@@ -7,7 +7,7 @@ import { Badge } from '../ui/badge';
 import { Alert, AlertDescription } from '../ui/alert';
 import { StatsBar } from '../ui/StatsBar';
 import { TopBar } from '../ui/TopBar';
-import { ChatConversation } from '../ui/ChatConversation';
+import { CallRecord } from '../ui/CallRecord';
 import { PaginationBar } from '../ui/PaginationBar';
 import { AppointmentToast } from '../ui/AppointmentToast';
 import { 
@@ -36,10 +36,10 @@ export function NewUIKitPage({ onNavigate }: NewUIKitPageProps) {
   const [currentPage, setCurrentPage] = useState(1);
   const { playNotificationSound } = useNotificationSound();
 
-  const sampleMessages = [
-    { id: '1', sender: 'ai' as const, content: 'Hello! How can I help you today?', timestamp: '10:00 AM' },
-    { id: '2', sender: 'patient' as const, content: 'I need to book an appointment', timestamp: '10:01 AM' },
-    { id: '3', sender: 'ai' as const, content: 'I\'d be happy to help you schedule an appointment.', timestamp: '10:01 AM' },
+  const sampleTranscript = [
+    { id: '1', speaker: 'ai' as const, text: 'Hello! How can I help you today?', timestamp: '00:00', duration: '0:03' },
+    { id: '2', speaker: 'patient' as const, text: 'I need to book an appointment', timestamp: '00:10', duration: '0:02' },
+    { id: '3', speaker: 'ai' as const, text: 'I\'d be happy to help you schedule an appointment.', timestamp: '00:15', duration: '0:04' },
   ];
 
   const statsBarData = [
@@ -188,11 +188,17 @@ export function NewUIKitPage({ onNavigate }: NewUIKitPageProps) {
             >
               <Card className="hover:shadow-lg transition-shadow">
                 <CardHeader>
-                  <CardTitle>Chat Conversation</CardTitle>
-                  <CardDescription>AI-Patient conversation display with animated messages</CardDescription>
+                  <CardTitle>Call Record</CardTitle>
+                  <CardDescription>AI voice call transcript with call quality and sentiment analysis</CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <ChatConversation messages={sampleMessages} patientName="John Smith" />
+                  <CallRecord
+                    transcript={sampleTranscript}
+                    patientName="John Smith"
+                    duration="2:15"
+                    callQuality={5}
+                    sentiment="positive"
+                  />
                 </CardContent>
               </Card>
             </motion.div>
