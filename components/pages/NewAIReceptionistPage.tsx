@@ -1,18 +1,38 @@
 import { useState, useEffect } from 'react';
-import { Bot, Phone, TrendingUp, CheckCircle, Search, X, PhoneCall, Clock } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../ui/card';
+import {
+  Bot,
+  Phone,
+  TrendingUp,
+  CheckCircle,
+  Search,
+  X,
+  PhoneCall,
+  Clock,
+  PhoneIncoming,
+  PhoneOutgoing,
+  PhoneMissed,
+  Volume2,
+  Star,
+  Activity,
+  User,
+  Calendar,
+  FileText,
+  Download,
+  ChevronRight,
+  ArrowUpRight,
+  Mic,
+} from 'lucide-react';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { Input } from '../ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { ScrollArea } from '../ui/scroll-area';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
 import { TopBar } from '../ui/TopBar';
+import { StatsBar } from '../ui/StatsBar';
 import { DevControls } from '../ui/DevControls';
 import { PaginationBar } from '../ui/PaginationBar';
-import { CallRecord } from '../ui/CallRecord';
 import DateRangePicker from '../ui/date-range-picker';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
 import { mockCalls, mockNotifications } from '../../data/mockData';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../ui/dialog';
 
@@ -25,6 +45,9 @@ interface DateRange {
   end: string | null;
 }
 
+// Shared height for both panels — keeps them equal and scrollable
+const PANEL_HEIGHT = 520;
+
 export function NewAIReceptionistPage({ onNavigate }: NewAIReceptionistPageProps) {
   const [showEmptyState, setShowEmptyState] = useState(false);
   const [selectedCall, setSelectedCall] = useState<string | null>(null);
@@ -35,8 +58,8 @@ export function NewAIReceptionistPage({ onNavigate }: NewAIReceptionistPageProps
   const [currentPage, setCurrentPage] = useState(1);
   const [showLargeDataset, setShowLargeDataset] = useState(false);
   const [itemsPerPage, setItemsPerPage] = useState(10);
+  const [detailTab, setDetailTab] = useState<'transcript' | 'summary'>('transcript');
 
-  // Generate large dataset if enabled
   const largeDataset = showLargeDataset
     ? Array.from({ length: 50 }, (_, i) => ({
         ...mockCalls[i % mockCalls.length],
@@ -47,7 +70,6 @@ export function NewAIReceptionistPage({ onNavigate }: NewAIReceptionistPageProps
 
   const allCalls = showEmptyState ? [] : largeDataset;
 
-  // Apply filters
   const filteredCalls = allCalls.filter((call) => {
     const matchesSearch =
       call.patient.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -56,7 +78,6 @@ export function NewAIReceptionistPage({ onNavigate }: NewAIReceptionistPageProps
     return matchesSearch && matchesStatus;
   });
 
-  // Set first call as selected by default
   useEffect(() => {
     if (filteredCalls.length > 0 && !selectedCall) {
       setSelectedCall(filteredCalls[0].id);
@@ -65,283 +86,450 @@ export function NewAIReceptionistPage({ onNavigate }: NewAIReceptionistPageProps
 
   const selectedCallData = allCalls.find((c) => c.id === selectedCall);
 
-  // Pagination
   const totalPages = Math.ceil(filteredCalls.length / itemsPerPage);
   const paginatedCalls = filteredCalls.slice(
     (currentPage - 1) * itemsPerPage,
     currentPage * itemsPerPage
   );
 
-  const getActionBadge = (call: any) => {
-    const actionMap = {
-      success: { text: 'Booked', color: '#27AE60', tooltip: 'Appointment successfully booked' },
-      failed: { text: 'Assisted', color: '#F2994A', tooltip: 'Provided assistance but no booking' },
+  const getCallTypeIcon = (type: string) => {
+    const map: Record<string, typeof Phone> = {
+      booking: Calendar,
+      inquiry: PhoneIncoming,
+      reschedule: PhoneOutgoing,
+      cancellation: PhoneMissed,
     };
-    const action = actionMap[call.status as keyof typeof actionMap] || actionMap.success;
-    return action;
+    return map[type] || Phone;
   };
+
+  const getStatusStyle = (status: string) => {
+    const map: Record<string, { label: string; className: string }> = {
+      success: { label: 'Completed', className: 'bg-[#27AE60]/10 text-[#27AE60]' },
+      failed: { label: 'Assisted', className: 'bg-[#F2994A]/10 text-[#F2994A]' },
+      transferred: { label: 'Transferred', className: 'bg-[#2F80ED]/10 text-[#2F80ED]' },
+    };
+    return map[status] || map.success;
+  };
+
+  const getTypeLabel = (type: string) => {
+    const map: Record<string, string> = {
+      booking: 'Booking',
+      inquiry: 'Inquiry',
+      reschedule: 'Reschedule',
+      cancellation: 'Cancellation',
+    };
+    return map[type] || type;
+  };
+
+  const getSentimentStyle = (sentiment: string) => {
+    const map: Record<string, { label: string; className: string }> = {
+      positive: { label: 'Positive', className: 'bg-[#27AE60]/10 text-[#27AE60]' },
+      neutral: { label: 'Neutral', className: 'bg-[#2F80ED]/10 text-[#2F80ED]' },
+      negative: { label: 'Negative', className: 'bg-[#EB5757]/10 text-[#EB5757]' },
+    };
+    return map[sentiment] || map.neutral;
+  };
+
+  const stats = [
+    { label: 'Calls Handled Today', value: 47, icon: PhoneCall, color: '#2F80ED', change: '+5' },
+    { label: 'Successful Bookings', value: 32, icon: CheckCircle, color: '#27AE60' },
+    { label: 'Success Rate', value: '94%', icon: TrendingUp, color: '#56CCF2' },
+    { label: 'Avg. Call Duration', value: '3:15', icon: Clock, color: '#F2994A' },
+  ];
 
   return (
     <div className="min-h-screen bg-[#F7F9FB]">
       <TopBar
         title="AI Receptionist"
-        description="Monitor and manage AI voice assistant call activity & performance"
         notificationCount={mockNotifications.length}
         onNotificationsClick={() => setShowNotifications(true)}
       />
 
-      <div className="p-6 max-w-7xl mx-auto space-y-6">
-        {/* Status Overview */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-          {[
-            {
-              label: 'Calls Handled Today',
-              value: '47',
-              icon: PhoneCall,
-              gradient: true,
-            },
-            {
-              label: 'Successful Bookings',
-              value: '32',
-              icon: CheckCircle,
-              color: '#27AE60',
-            },
-            {
-              label: 'Success Rate',
-              value: '94%',
-              icon: TrendingUp,
-              color: '#56CCF2',
-            },
-            {
-              label: 'Avg. Call Duration',
-              value: '3:15',
-              icon: Clock,
-              color: '#F2994A',
-            },
-          ].map((stat, index) => (
-            <motion.div
-              key={index}
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              transition={{ delay: index * 0.1 }}
-              whileHover={{ scale: 1.05, y: -5 }}
-            >
-              <Card className="hover:shadow-lg transition-all cursor-pointer border-none">
-                <CardContent className="p-6">
-                  <div
-                    className={`w-10 h-10 rounded-lg mb-3 flex items-center justify-center ${
-                      stat.gradient
-                        ? 'bg-gradient-to-br from-[#2F80ED] to-[#56CCF2]'
-                        : ''
-                    }`}
-                    style={{
-                      backgroundColor: stat.gradient ? undefined : `${stat.color}15`,
-                    }}
-                  >
-                    <stat.icon
-                      className="w-5 h-5"
-                      style={{ color: stat.gradient ? 'white' : stat.color }}
-                    />
-                  </div>
-                  <p className="text-sm text-gray-600 mb-1">{stat.label}</p>
-                  <p className="text-3xl text-[#333333]">{stat.value}</p>
-                </CardContent>
-              </Card>
-            </motion.div>
-          ))}
-        </div>
+      <div className="p-8 max-w-7xl mx-auto flex flex-col gap-6">
+        <StatsBar stats={stats} />
 
-        {/* Search and Filter */}
+        {/* Filters */}
         <motion.div
-          initial={{ y: -20, opacity: 0 }}
+          initial={{ y: -10, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
           className="flex flex-col sm:flex-row gap-4"
         >
           <div className="relative flex-1">
             <Search className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
             <Input
-              placeholder="Search call records..."
+              placeholder="Search by caller name or phone..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="pl-10 h-12"
             />
           </div>
           <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className="w-full sm:w-48 h-12">
+            <SelectTrigger className="w-full sm:w-44 h-12">
               <SelectValue placeholder="Filter by outcome" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Calls</SelectItem>
-              <SelectItem value="success">Successful</SelectItem>
+              <SelectItem value="success">Completed</SelectItem>
               <SelectItem value="failed">Assisted</SelectItem>
             </SelectContent>
           </Select>
           <DateRangePicker value={dateRange} onChange={setDateRange} />
         </motion.div>
 
-        {/* Call Records */}
+        {/* Two-panel layout — equal height, both scrollable */}
         <motion.div
           initial={{ y: 20, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
-          transition={{ delay: 0.3 }}
+          transition={{ delay: 0.2 }}
         >
           <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
-            {/* Call List */}
+            {/* ── Call List ── */}
             <div className="lg:col-span-2">
-              <Card className="overflow-hidden hover:shadow-lg transition-shadow">
-                <CardHeader className="border-b bg-white">
-                  <div className="flex items-center justify-between">
-                    <CardTitle className="text-lg">Recent Calls</CardTitle>
-                    <Badge variant="outline" className="text-xs">
-                      {filteredCalls.length} total
-                    </Badge>
-                  </div>
-                </CardHeader>
-                <CardContent className="p-0">
+              <div
+                className="bg-white rounded-xl border overflow-hidden hover:shadow-lg transition-shadow flex flex-col"
+                style={{ height: PANEL_HEIGHT }}
+              >
+                {/* List header */}
+                <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 shrink-0">
+                  <h3 className="text-base font-semibold leading-none">Recent Calls</h3>
+                  <span className="text-xs text-gray-500">{filteredCalls.length} total</span>
+                </div>
+
+                {/* Scrollable list body */}
+                <div className="flex-1 overflow-hidden">
                   {filteredCalls.length === 0 ? (
-                    <div className="p-12 text-center">
-                      <Phone className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-                      <h3 className="text-base text-gray-600 mb-1">
-                        {showEmptyState ? 'No Calls Yet' : 'No Calls Found'}
-                      </h3>
-                      <p className="text-sm text-gray-500">
-                        {showEmptyState
-                          ? 'Call records will appear here once the AI receptionist starts handling calls.'
-                          : 'Try adjusting your search or filters.'}
-                      </p>
+                    <div className="h-full flex items-center justify-center p-12 text-center">
+                      <div>
+                        <Phone className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+                        <h3 className="text-base text-gray-600 mb-1">
+                          {showEmptyState ? 'No Calls Yet' : 'No Calls Found'}
+                        </h3>
+                        <p className="text-sm text-gray-500">
+                          {showEmptyState
+                            ? 'Call records will appear here once the AI receptionist starts handling calls.'
+                            : 'Try adjusting your search or filters.'}
+                        </p>
+                      </div>
                     </div>
                   ) : (
-                    <ScrollArea className="h-[600px]">
-                      <div className="p-3 space-y-2">
-                        {paginatedCalls.map((call, index) => (
-                          <motion.div
-                            key={call.id}
-                            initial={{ x: -20, opacity: 0 }}
-                            animate={{ x: 0, opacity: 1 }}
-                            transition={{ delay: index * 0.05 }}
-                            whileHover={{ scale: 1.02 }}
-                            onClick={() => setSelectedCall(call.id)}
-                            className={`p-3 rounded-lg transition-all cursor-pointer ${
-                              selectedCall === call.id
-                                ? 'bg-gradient-to-r from-[#2F80ED]/10 to-[#56CCF2]/10 border-2 border-[#2F80ED]/30'
-                                : 'bg-gray-50 hover:bg-gray-100 border-2 border-transparent'
-                            }`}
-                          >
-                            <div className="flex items-start gap-3">
-                              <div className="w-10 h-10 bg-gradient-to-br from-[#2F80ED] to-[#56CCF2] rounded-full flex items-center justify-center text-white text-sm shadow-sm flex-shrink-0">
-                                <Phone className="w-5 h-5" />
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <div className="flex items-center justify-between mb-1">
-                                  <h3 className="text-sm font-medium text-[#333333] truncate">
-                                    {call.patient}
-                                  </h3>
-                                  <TooltipProvider>
-                                    <Tooltip>
-                                      <TooltipTrigger>
-                                        <Badge
-                                          className="text-xs px-2 py-0.5"
-                                          style={{
-                                            backgroundColor: `${getActionBadge(call).color}15`,
-                                            color: getActionBadge(call).color,
-                                          }}
-                                        >
-                                          {getActionBadge(call).text}
-                                        </Badge>
-                                      </TooltipTrigger>
-                                      <TooltipContent>
-                                        <p>{getActionBadge(call).tooltip}</p>
-                                      </TooltipContent>
-                                    </Tooltip>
-                                  </TooltipProvider>
+                    <ScrollArea className="h-full">
+                      <div className="divide-y divide-gray-100">
+                        {paginatedCalls.map((call, index) => {
+                          const CallTypeIcon = getCallTypeIcon(call.type);
+                          const statusStyle = getStatusStyle(call.status);
+                          const isSelected = selectedCall === call.id;
+
+                          return (
+                            <motion.div
+                              key={call.id}
+                              initial={{ opacity: 0 }}
+                              animate={{ opacity: 1 }}
+                              transition={{ delay: index * 0.03 }}
+                              onClick={() => {
+                                setSelectedCall(call.id);
+                                setDetailTab('transcript');
+                              }}
+                              className={`relative px-6 py-4 cursor-pointer transition-colors ${
+                                isSelected ? 'bg-[#2F80ED]/5' : 'hover:bg-gray-50'
+                              }`}
+                            >
+                              {isSelected && (
+                                <div className="absolute left-0 top-3 bottom-3 w-[3px] bg-[#2F80ED] rounded-r-full" />
+                              )}
+                              <div className="flex items-center gap-4">
+                                <div
+                                  className={`w-11 h-11 rounded-full flex items-center justify-center shrink-0 ${
+                                    isSelected
+                                      ? 'bg-gradient-to-br from-[#2F80ED] to-[#56CCF2] text-white shadow-sm'
+                                      : 'bg-gray-100 text-gray-500'
+                                  }`}
+                                >
+                                  <CallTypeIcon className="w-5 h-5" />
                                 </div>
-                                <p className="text-xs text-gray-500 truncate mb-1">
-                                  {call.summary}
-                                </p>
-                                <div className="flex items-center gap-2 text-xs text-gray-400">
-                                  <Clock className="w-3 h-3" />
-                                  <span>{call.duration}</span>
-                                  <span>•</span>
-                                  <span>{call.startTime}</span>
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center justify-between mb-1">
+                                    <h3 className="text-sm font-medium text-[#333333] truncate pr-2">
+                                      {call.patient}
+                                    </h3>
+                                    <Badge className={`text-[10px] px-2 py-0.5 border-none shrink-0 ${statusStyle.className}`}>
+                                      {statusStyle.label}
+                                    </Badge>
+                                  </div>
+                                  <p className="text-xs text-gray-500 truncate mb-1.5">{call.summary}</p>
+                                  <div className="flex items-center gap-3 text-[11px] text-gray-400">
+                                    <span className="flex items-center gap-1">
+                                      <Clock className="w-3 h-3" />
+                                      {call.duration}
+                                    </span>
+                                    <span>{call.startTime}</span>
+                                    <span className="text-gray-300">|</span>
+                                    <span>{getTypeLabel(call.type)}</span>
+                                  </div>
                                 </div>
+                                {isSelected && (
+                                  <ChevronRight className="w-4 h-4 text-[#2F80ED] shrink-0" />
+                                )}
                               </div>
-                            </div>
-                          </motion.div>
-                        ))}
+                            </motion.div>
+                          );
+                        })}
                       </div>
                     </ScrollArea>
                   )}
-                </CardContent>
-              </Card>
+                </div>
+              </div>
             </div>
 
-            {/* Selected Call Details */}
+            {/* ── Call Detail Panel ── */}
             <div className="lg:col-span-3">
-              <Card className="overflow-hidden hover:shadow-lg transition-shadow h-[660px]">
+              <AnimatePresence mode="wait">
                 {selectedCallData ? (
-                  <>
-                    <CardHeader className="border-b bg-white">
-                      <div className="flex items-center justify-between">
+                  <motion.div
+                    key={selectedCallData.id}
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.15 }}
+                  >
+                    <div
+                      className="bg-white rounded-xl border overflow-hidden hover:shadow-lg transition-shadow flex flex-col"
+                      style={{ height: PANEL_HEIGHT }}
+                    >
+                      {/* Header */}
+                      <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 shrink-0">
                         <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 bg-gradient-to-br from-[#2F80ED] to-[#56CCF2] rounded-full flex items-center justify-center text-white text-sm">
-                            <Phone className="w-5 h-5" />
+                          <div className="w-10 h-10 bg-gradient-to-br from-[#2F80ED] to-[#56CCF2] rounded-full flex items-center justify-center text-white text-sm shadow-sm">
+                            {selectedCallData.patient.split(' ').map(n => n[0]).join('')}
                           </div>
                           <div>
-                            <CardTitle className="text-base">{selectedCallData.patient}</CardTitle>
-                            <CardDescription className="text-xs">{selectedCallData.patientPhone}</CardDescription>
+                            <h3 className="text-base font-semibold leading-none">{selectedCallData.patient}</h3>
+                            <p className="text-xs text-gray-500 mt-1.5">{selectedCallData.patientPhone}</p>
                           </div>
                         </div>
-                        <div className="flex items-center gap-2">
-                          <TooltipProvider>
-                            <Tooltip>
-                              <TooltipTrigger>
-                                <Badge
-                                  className="text-xs"
-                                  style={{
-                                    backgroundColor: `${getActionBadge(selectedCallData).color}15`,
-                                    color: getActionBadge(selectedCallData).color,
-                                  }}
-                                >
-                                  {getActionBadge(selectedCallData).text}
-                                </Badge>
-                              </TooltipTrigger>
-                              <TooltipContent>
-                                <p>{getActionBadge(selectedCallData).tooltip}</p>
-                              </TooltipContent>
-                            </Tooltip>
-                          </TooltipProvider>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => setSelectedCall(null)}
-                          >
+                        <div className="flex items-center gap-3">
+                          <Badge className={`text-xs ${getStatusStyle(selectedCallData.status).className}`}>
+                            {getStatusStyle(selectedCallData.status).label}
+                          </Badge>
+                          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setSelectedCall(null)}>
                             <X className="w-4 h-4" />
                           </Button>
                         </div>
                       </div>
-                    </CardHeader>
-                    <CardContent className="p-6">
-                      <CallRecord
-                        transcript={selectedCallData.transcript}
-                        patientName={selectedCallData.patient}
-                        duration={selectedCallData.duration}
-                        callQuality={selectedCallData.callQuality}
-                        sentiment={selectedCallData.sentiment}
-                      />
-                    </CardContent>
-                  </>
-                ) : (
-                  <div className="h-full flex items-center justify-center p-12 text-center">
-                    <div>
-                      <Bot className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-                      <h3 className="text-lg text-gray-600 mb-2">Select a Call</h3>
-                      <p className="text-sm text-gray-500">
-                        Click on a call from the list to view the recording transcript
-                      </p>
+
+                      {/* Metadata */}
+                      <div className="px-6 py-3 bg-[#F7F9FB] border-b border-gray-100 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-gray-600 shrink-0">
+                        <div className="flex items-center gap-1.5">
+                          <Clock className="w-3.5 h-3.5 text-gray-400" />
+                          <span>{selectedCallData.startTime} – {selectedCallData.endTime}</span>
+                          <span className="text-gray-400">({selectedCallData.duration})</span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <Activity className="w-3.5 h-3.5 text-gray-400" />
+                          <span>{getTypeLabel(selectedCallData.type)}</span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <Badge variant="outline" className={`text-[11px] px-2 py-0 h-5 border-none ${getSentimentStyle(selectedCallData.sentiment).className}`}>
+                            {getSentimentStyle(selectedCallData.sentiment).label}
+                          </Badge>
+                        </div>
+                        <div className="flex items-center gap-0.5">
+                          {[...Array(5)].map((_, i) => (
+                            <Star
+                              key={i}
+                              className={`w-3.5 h-3.5 ${
+                                i < selectedCallData.callQuality
+                                  ? 'fill-amber-400 text-amber-400'
+                                  : 'text-gray-300'
+                              }`}
+                            />
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Tabs */}
+                      <div className="border-b border-gray-100 bg-white shrink-0">
+                        <div className="flex px-6 gap-1">
+                          {[
+                            { id: 'transcript' as const, label: 'Transcript' },
+                            { id: 'summary' as const, label: 'Summary' },
+                          ].map((tab) => (
+                            <button
+                              key={tab.id}
+                              onClick={() => setDetailTab(tab.id)}
+                              className={`relative px-4 py-3 text-sm transition-colors ${
+                                detailTab === tab.id
+                                  ? 'text-[#2F80ED] font-medium'
+                                  : 'text-gray-500 hover:text-gray-700'
+                              }`}
+                            >
+                              {tab.label}
+                              {detailTab === tab.id && (
+                                <motion.div
+                                  layoutId="detailTab"
+                                  className="absolute bottom-0 left-2 right-2 h-0.5 bg-[#2F80ED] rounded-full"
+                                />
+                              )}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Scrollable content — takes all remaining space */}
+                      <div className="flex-1 overflow-hidden">
+                        <ScrollArea className="h-full">
+                          {detailTab === 'transcript' ? (
+                            <div className="p-6 flex flex-col gap-6">
+                              {selectedCallData.transcript.map((segment, index) => {
+                                const isAI = segment.speaker === 'ai';
+                                return (
+                                  <motion.div
+                                    key={segment.id}
+                                    initial={{ opacity: 0, y: 8 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    transition={{ delay: index * 0.025 }}
+                                    className={`flex gap-3 ${isAI ? '' : 'flex-row-reverse'}`}
+                                  >
+                                    <div
+                                      className={`shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-white ${
+                                        isAI
+                                          ? 'bg-gradient-to-br from-[#2F80ED] to-[#56CCF2]'
+                                          : 'bg-gradient-to-br from-[#27AE60] to-[#56CCF2]'
+                                      }`}
+                                    >
+                                      {isAI ? <Bot className="w-4 h-4" /> : <User className="w-4 h-4" />}
+                                    </div>
+                                    <div className="flex-1 max-w-[78%]">
+                                      <div className={`flex items-center gap-2 mb-1 ${isAI ? '' : 'justify-end'}`}>
+                                        <span className="text-xs font-medium text-gray-600">
+                                          {isAI ? 'Aiva AI' : selectedCallData.patient}
+                                        </span>
+                                        <span className="text-[11px] text-gray-400">{segment.timestamp}</span>
+                                      </div>
+                                      <div
+                                        className={`px-4 py-3 rounded-2xl text-sm leading-relaxed ${
+                                          isAI
+                                            ? 'bg-gray-100 text-gray-700 rounded-tl-sm'
+                                            : 'bg-gradient-to-r from-[#2F80ED] to-[#56CCF2] text-white rounded-tr-sm'
+                                        }`}
+                                      >
+                                        {segment.text}
+                                      </div>
+                                    </div>
+                                  </motion.div>
+                                );
+                              })}
+                            </div>
+                          ) : (
+                            <div className="p-6 flex flex-col gap-6">
+                              <div className="p-4 bg-[#2F80ED]/5 rounded-xl border border-[#2F80ED]/10">
+                                <div className="flex items-start gap-3">
+                                  <div className="w-8 h-8 bg-gradient-to-br from-[#2F80ED] to-[#56CCF2] rounded-lg flex items-center justify-center shrink-0 mt-0.5">
+                                    <FileText className="w-4 h-4 text-white" />
+                                  </div>
+                                  <div>
+                                    <p className="text-xs font-medium text-[#2F80ED] mb-1">Call Outcome</p>
+                                    <p className="text-sm text-gray-700 leading-relaxed">
+                                      {selectedCallData.summary}
+                                    </p>
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div>
+                                <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Call Details</h4>
+                                <div className="grid grid-cols-2 gap-3">
+                                  {[
+                                    { label: 'Caller', value: selectedCallData.patient, icon: User },
+                                    { label: 'Phone', value: selectedCallData.patientPhone, icon: Phone },
+                                    { label: 'Duration', value: selectedCallData.duration, icon: Clock },
+                                    { label: 'Type', value: getTypeLabel(selectedCallData.type), icon: Activity },
+                                    { label: 'Start', value: selectedCallData.startTime, icon: ArrowUpRight },
+                                    { label: 'Quality', value: `${selectedCallData.callQuality}/5`, icon: Star },
+                                  ].map((item) => (
+                                    <div key={item.label} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
+                                      <item.icon className="w-4 h-4 text-gray-400 shrink-0" />
+                                      <div>
+                                        <p className="text-[11px] text-gray-400">{item.label}</p>
+                                        <p className="text-sm text-[#333333] font-medium">{item.value}</p>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+
+                              <div>
+                                <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Conversation Flow</h4>
+                                <div className="space-y-0">
+                                  {selectedCallData.transcript.map((segment, i) => {
+                                    const isAI = segment.speaker === 'ai';
+                                    const isLast = i === selectedCallData.transcript.length - 1;
+                                    return (
+                                      <div key={segment.id} className="flex gap-3">
+                                        <div className="flex flex-col items-center">
+                                          <div
+                                            className={`w-2.5 h-2.5 rounded-full shrink-0 mt-1.5 ${
+                                              isAI ? 'bg-[#2F80ED]' : 'bg-[#27AE60]'
+                                            }`}
+                                          />
+                                          {!isLast && <div className="w-px flex-1 bg-gray-200 min-h-[16px]" />}
+                                        </div>
+                                        <div className="pb-3 flex-1 min-w-0">
+                                          <div className="flex items-center gap-2">
+                                            <span className="text-xs font-medium text-gray-600">
+                                              {isAI ? 'Aiva AI' : selectedCallData.patient}
+                                            </span>
+                                            <span className="text-[11px] text-gray-400">{segment.timestamp}</span>
+                                          </div>
+                                          <p className="text-xs text-gray-500 leading-relaxed mt-0.5 line-clamp-2">{segment.text}</p>
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </ScrollArea>
+                      </div>
+
+                      {/* Footer */}
+                      <div className="border-t border-gray-100 px-6 py-3 bg-white flex items-center justify-between shrink-0">
+                        <div className="flex items-center gap-1.5 text-xs text-gray-400">
+                          <Mic className="w-3.5 h-3.5" />
+                          <span>Call recording available</span>
+                        </div>
+                        <div className="flex gap-2">
+                          <Button variant="outline" size="sm" className="text-xs h-8">
+                            <Volume2 className="w-3.5 h-3.5 mr-1.5" />
+                            Play
+                          </Button>
+                          <Button variant="outline" size="sm" className="text-xs h-8">
+                            <Download className="w-3.5 h-3.5 mr-1.5" />
+                            Export
+                          </Button>
+                        </div>
+                      </div>
                     </div>
-                  </div>
+                  </motion.div>
+                ) : (
+                  <motion.div key="empty" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+                    <div
+                      className="bg-white rounded-xl border flex items-center justify-center hover:shadow-lg transition-shadow"
+                      style={{ height: PANEL_HEIGHT }}
+                    >
+                      <div className="text-center">
+                        <div className="w-16 h-16 bg-gradient-to-br from-[#2F80ED]/10 to-[#56CCF2]/10 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                          <PhoneCall className="w-8 h-8 text-[#2F80ED]/30" />
+                        </div>
+                        <h3 className="text-lg text-gray-600 mb-1">Select a Call</h3>
+                        <p className="text-sm text-gray-400 max-w-[220px]">
+                          Click on a call from the list to view the full details and transcript
+                        </p>
+                      </div>
+                    </div>
+                  </motion.div>
                 )}
-              </Card>
+              </AnimatePresence>
             </div>
           </div>
         </motion.div>
@@ -378,7 +566,7 @@ export function NewAIReceptionistPage({ onNavigate }: NewAIReceptionistPageProps
               Recent AI Receptionist notifications and alerts
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-3 mt-3">
+          <div className="flex flex-col gap-3 mt-3">
             {mockNotifications.map((notification, index) => (
               <motion.div
                 key={notification.id}

@@ -180,7 +180,7 @@ export function NewUIKitPage({ onNavigate }: NewUIKitPageProps) {
               </Card>
             </motion.div>
 
-            {/* Chat Conversation */}
+            {/* Call Transcript */}
             <motion.div
               initial={{ y: 20, opacity: 0 }}
               animate={{ y: 0, opacity: 1 }}
@@ -459,7 +459,7 @@ export function NewUIKitPage({ onNavigate }: NewUIKitPageProps) {
             {[
               { icon: Calendar, label: 'Appointments', value: '24', gradient: 'from-[#2F80ED] to-[#56CCF2]' },
               { icon: Users, label: 'Patients', value: '156', gradient: 'from-[#56CCF2] to-[#27AE60]' },
-              { icon: Bot, label: 'AI Chats', value: '47', gradient: 'from-[#27AE60] to-[#2F80ED]' },
+              { icon: Bot, label: 'AI Calls', value: '47', gradient: 'from-[#27AE60] to-[#2F80ED]' },
             ].map((item, index) => (
               <motion.div
                 key={item.label}

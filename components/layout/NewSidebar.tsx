@@ -3,7 +3,7 @@ import {
   LayoutDashboard,
   Calendar,
   Users,
-  MessageSquare,
+  Phone,
   BarChart3,
   Settings,
   LogOut,
@@ -55,7 +55,7 @@ const mainMenuItems = [
   {
     id: "ai-receptionist" as PageType,
     label: "AI Receptionist",
-    icon: MessageSquare,
+    icon: Phone,
   },
   {
     id: "analytics" as PageType,

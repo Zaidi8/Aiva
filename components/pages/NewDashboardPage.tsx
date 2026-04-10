@@ -1,5 +1,5 @@
 import { toast } from 'sonner';
-import { Calendar, Clock, XCircle, ThumbsUp, Bot, MessageSquare, ArrowRight, Plus } from 'lucide-react';
+import { Calendar, Clock, XCircle, ThumbsUp, Bot, PhoneCall, ArrowRight, Plus } from 'lucide-react';
 import { Card, CardContent } from '../ui/card';
 import { Button } from '../ui/button';
 import { TopBar } from '../ui/TopBar';
@@ -124,7 +124,7 @@ export function NewDashboardPage({ onNavigate }: NewDashboardPageProps) {
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 {[
-                  { label: 'Chats Handled Today', value: '47', icon: MessageSquare },
+                  { label: 'Calls Handled Today', value: '47', icon: PhoneCall },
                   { label: 'Bookings Made', value: '32', icon: Calendar },
                   { label: 'Success Rate', value: '94%', icon: ThumbsUp },
                 ].map((stat, index) => (

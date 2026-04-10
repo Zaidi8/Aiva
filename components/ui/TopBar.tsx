@@ -37,7 +37,7 @@ const mockNotifications = [
   },
   {
     id: '3',
-    title: 'New Chat Message',
+    title: 'New Call Received',
     description: 'Patient inquiry about clinic hours',
     time: '2 hours ago',
     unread: false,

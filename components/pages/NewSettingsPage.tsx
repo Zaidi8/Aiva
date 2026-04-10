@@ -139,8 +139,8 @@ export function NewSettingsPage({ onNavigate, initialTab = 'profile' }: NewSetti
                       defaultChecked: true,
                     },
                     {
-                      label: 'AI Chat Notifications',
-                      description: 'Notifications for AI receptionist conversations',
+                      label: 'AI Call Notifications',
+                      description: 'Notifications for AI receptionist call activity',
                       defaultChecked: true,
                     },
                     {
