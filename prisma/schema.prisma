@@ -1,0 +1,316 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// Aiva — Prisma Schema
+//
+// Built from the data dictionary in the FYP documentation (§3.4.1) and the
+// UI states defined in wireframes.md. Designed to be stack-agnostic at the
+// data layer: the same schema serves the dashboard today and any future
+// voice/AI integration (Retell, Twilio, self-hosted Whisper+Rasa) tomorrow.
+//
+// Conventions:
+//   • cuid() over uuid() for primary keys (shorter, URL-safe, sortable)
+//   • Soft single-clinic: one Clinic row holds clinic-level config and is
+//     the parent of AiSettings. Multi-clinic later = add clinicId FKs.
+//   • Supabase Auth lives in auth.users (Prisma can't manage it). We store
+//     the Supabase user UUID on ClinicStaff.authUserId as the link.
+//   • Double-booking is prevented at the DB level via a unique constraint
+//     on (doctorId, scheduledAt). Race-safe, atomic.
+// ─────────────────────────────────────────────────────────────────────────────
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ENUMS
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum Gender {
+  Male
+  Female
+  Other
+}
+
+enum StaffRole {
+  Admin
+  Doctor
+  Receptionist
+}
+
+enum AppointmentType {
+  Checkup
+  Consultation
+  FollowUp
+  Emergency
+}
+
+enum AppointmentStatus {
+  Pending
+  Confirmed
+  Completed
+  Cancelled
+}
+
+enum CallType {
+  Booking
+  Reschedule
+  Cancellation
+  Inquiry
+}
+
+enum CallOutcome {
+  Completed     // resolved by AI
+  Assisted      // AI helped, partial resolution
+  Transferred   // escalated to human
+  Failed        // call dropped or unresolvable
+}
+
+enum CallSentiment {
+  Positive
+  Neutral
+  Negative
+}
+
+enum NotificationType {
+  Confirmation
+  Reminder
+  Cancellation
+  Reschedule
+  System
+}
+
+enum NotificationStatus {
+  Pending
+  Sent
+  Failed
+}
+
+enum NotificationChannel {
+  SMS
+  Push
+  Email
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CLINIC — single row in single-clinic deployments. Holds clinic-level config.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Clinic {
+  id        String   @id @default(cuid())
+  name      String
+  address   String?
+  phone     String?
+  email     String?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  staff       ClinicStaff[]
+  doctors     Doctor[]
+  patients    Patient[]
+  appointments Appointment[]
+  aiSettings  AiSettings?
+
+  @@map("clinic")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CLINIC STAFF — dashboard users. Linked 1:1 to a Supabase auth.users row.
+// authUserId is the Supabase user UUID; password lives in Supabase Auth, not here.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model ClinicStaff {
+  id          String    @id @default(cuid())
+  authUserId  String    @unique @map("auth_user_id")
+  fullName    String    @map("full_name")
+  email       String    @unique
+  role        StaffRole @default(Receptionist)
+  phone       String?
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  clinicId String @map("clinic_id")
+  clinic   Clinic @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+
+  @@index([clinicId])
+  @@map("clinic_staff")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PATIENT
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Patient {
+  id              String    @id @default(cuid())
+  fullName        String    @map("full_name")
+  age             Int?
+  gender          Gender?
+  phoneNumber     String    @map("phone_number")
+  email           String?
+  address         String?
+  medicalHistory  String[]  @map("medical_history") // tagged conditions per data dictionary
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  clinicId String @map("clinic_id")
+  clinic   Clinic @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+
+  appointments Appointment[]
+  callLogs     CallLog[]
+  notifications Notification[]
+
+  @@index([clinicId])
+  @@index([phoneNumber]) // voice agent lookup by caller number
+  @@map("patient")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DOCTOR
+// availableSlots & workingHours kept as JSON per data dictionary; can be
+// normalized to a dedicated Availability table later if scheduling logic grows.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Doctor {
+  id              String   @id @default(cuid())
+  name            String
+  specialization  String
+  email           String?  @unique
+  phone           String?
+  availableSlots  Json?    @map("available_slots") // [{day, start, end}, ...]
+  workingHours    Json?    @map("working_hours")   // {mon: {start, end}, ...}
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  clinicId String @map("clinic_id")
+  clinic   Clinic @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+
+  appointments Appointment[]
+
+  @@index([clinicId])
+  @@map("doctor")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// APPOINTMENT
+// Combined date+time into a single scheduledAt timestamp — easier for queries,
+// timezone-correct, and lets us put the unique double-booking constraint on it.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Appointment {
+  id           String            @id @default(cuid())
+  scheduledAt  DateTime          @map("scheduled_at")
+  durationMin  Int               @default(30) @map("duration_min")
+  type         AppointmentType
+  status       AppointmentStatus @default(Pending)
+  notes        String?
+  createdAt    DateTime          @default(now()) @map("created_at")
+  updatedAt    DateTime          @updatedAt @map("updated_at")
+
+  patientId String  @map("patient_id")
+  patient   Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  doctorId String @map("doctor_id")
+  doctor   Doctor @relation(fields: [doctorId], references: [id], onDelete: Restrict)
+
+  clinicId String @map("clinic_id")
+  clinic   Clinic @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+
+  notifications Notification[]
+  callLogs      CallLog[]
+
+  // DB-level double-booking prevention. Atomic, race-safe.
+  @@unique([doctorId, scheduledAt], name: "doctor_slot_unique")
+  @@index([clinicId])
+  @@index([patientId])
+  @@index([doctorId, scheduledAt])
+  @@index([scheduledAt])
+  @@index([status])
+  @@map("appointment")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CALL LOG — every voice interaction with the AI receptionist.
+// patientId is nullable so unknown-caller logs still get recorded.
+// appointmentId links the call to the resulting booking, if any.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model CallLog {
+  id              String         @id @default(cuid())
+  patientPhone    String         @map("patient_phone")
+  durationSec     Int            @map("duration_sec")
+  detectedIntent  CallType?      @map("detected_intent")
+  outcome         CallOutcome
+  transcript      Json?          // [{role, text, timestamp}, ...]
+  sentiment       CallSentiment?
+  qualityRating   Int?           @map("quality_rating") // 1-5
+  recordingUrl    String?        @map("recording_url")
+  startedAt       DateTime       @map("started_at")
+  endedAt         DateTime?      @map("ended_at")
+  createdAt       DateTime       @default(now()) @map("created_at")
+
+  patientId String?  @map("patient_id")
+  patient   Patient? @relation(fields: [patientId], references: [id], onDelete: SetNull)
+
+  appointmentId String?      @map("appointment_id")
+  appointment   Appointment? @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
+
+  @@index([patientId])
+  @@index([appointmentId])
+  @@index([patientPhone])
+  @@index([startedAt])
+  @@index([outcome])
+  @@map("call_log")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// NOTIFICATION — confirmations, reminders, cancellation alerts.
+// Channel-agnostic at the data layer (SMS/push/email — provider plugs in later).
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Notification {
+  id        String              @id @default(cuid())
+  type      NotificationType
+  channel   NotificationChannel
+  status    NotificationStatus  @default(Pending)
+  message   String
+  sentAt    DateTime?           @map("sent_at")
+  errorMsg  String?             @map("error_msg")
+  createdAt DateTime            @default(now()) @map("created_at")
+
+  patientId String  @map("patient_id")
+  patient   Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  appointmentId String?      @map("appointment_id")
+  appointment   Appointment? @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
+
+  @@index([patientId])
+  @@index([appointmentId])
+  @@index([status])
+  @@map("notification")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AI SETTINGS — singleton config for the AI receptionist agent.
+// 1:1 with Clinic. Maps to the Settings → AI tab in the dashboard.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model AiSettings {
+  id                   String   @id @default(cuid())
+  agentName            String   @default("Aiva") @map("agent_name")
+  greetingMessage      String   @default("Hello! Thank you for calling. How may I help you today?") @map("greeting_message")
+  autoBook             Boolean  @default(true) @map("auto_book")
+  sendConfirmations    Boolean  @default(true) @map("send_confirmations")
+  handleRescheduling   Boolean  @default(true) @map("handle_rescheduling")
+  emergencyTransfer    Boolean  @default(true) @map("emergency_transfer")
+  createdAt            DateTime @default(now()) @map("created_at")
+  updatedAt            DateTime @updatedAt @map("updated_at")
+
+  clinicId String @unique @map("clinic_id")
+  clinic   Clinic @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+
+  @@map("ai_settings")
+}
