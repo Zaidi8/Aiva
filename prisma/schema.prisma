@@ -106,14 +106,18 @@ model Clinic {
   address   String?
   phone     String?
   email     String?
+  // IANA tz name. Source of truth for "9am means what" — drives all
+  // appointment scheduling, schedule editor, and reminder dispatch logic.
+  timezone  String   @default("Asia/Karachi") @map("timezone")
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  staff       ClinicStaff[]
-  doctors     Doctor[]
-  patients    Patient[]
+  staff        ClinicStaff[]
+  doctors      Doctor[]
+  patients     Patient[]
   appointments Appointment[]
-  aiSettings  AiSettings?
+  aiSettings   AiSettings?
+  invitations  StaffInvitation[]
 
   @@map("clinic")
 }
@@ -124,17 +128,23 @@ model Clinic {
 // ─────────────────────────────────────────────────────────────────────────────
 
 model ClinicStaff {
-  id          String    @id @default(cuid())
-  authUserId  String    @unique @map("auth_user_id")
-  fullName    String    @map("full_name")
-  email       String    @unique
-  role        StaffRole @default(Receptionist)
-  phone       String?
-  createdAt   DateTime  @default(now()) @map("created_at")
-  updatedAt   DateTime  @updatedAt @map("updated_at")
+  id            String    @id @default(cuid())
+  authUserId    String    @unique @map("auth_user_id")
+  fullName      String    @map("full_name")
+  email         String    @unique
+  role          StaffRole @default(Receptionist)
+  phone         String?
+  jobTitle      String?   @map("job_title") // e.g. "Practice Manager", "Lead Physician"
+  deactivatedAt DateTime? @map("deactivated_at") // soft delete — getCurrentStaff filters these out
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
 
   clinicId String @map("clinic_id")
   clinic   Clinic @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+
+  // The doctor row this staff member is linked to, if any. Set by Doctor.clinicStaffId.
+  linkedDoctor    Doctor?
+  sentInvitations StaffInvitation[]
 
   @@index([clinicId])
   @@map("clinic_staff")
@@ -175,20 +185,31 @@ model Patient {
 // ─────────────────────────────────────────────────────────────────────────────
 
 model Doctor {
-  id              String   @id @default(cuid())
-  name            String
-  specialization  String
-  email           String?  @unique
-  phone           String?
-  availableSlots  Json?    @map("available_slots") // [{day, start, end}, ...]
-  workingHours    Json?    @map("working_hours")   // {mon: {start, end}, ...}
-  createdAt       DateTime @default(now()) @map("created_at")
-  updatedAt       DateTime @updatedAt @map("updated_at")
+  id             String   @id @default(cuid())
+  name           String
+  specialization String
+  email          String?  @unique
+  phone          String?
+  // DEPRECATED: use DoctorSchedule and DoctorTimeOff. Will be dropped after Chat B migration.
+  availableSlots Json?    @map("available_slots") // [{day, start, end}, ...]
+  // DEPRECATED: use DoctorSchedule and DoctorTimeOff. Will be dropped after Chat B migration.
+  workingHours   Json?    @map("working_hours")   // {mon: {start, end}, ...}
+  deactivatedAt  DateTime? @map("deactivated_at") // soft delete
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
 
   clinicId String @map("clinic_id")
   clinic   Clinic @relation(fields: [clinicId], references: [id], onDelete: Cascade)
 
+  // Optional link to a ClinicStaff login user. Doctor rows can exist without
+  // a login (clinic-managed); when a doctor logs in to the dashboard themselves
+  // we link them via this FK. SetNull so deleting the staff doesn't nuke the doctor.
+  clinicStaffId String?      @unique @map("clinic_staff_id")
+  clinicStaff   ClinicStaff? @relation(fields: [clinicStaffId], references: [id], onDelete: SetNull)
+
   appointments Appointment[]
+  schedules    DoctorSchedule[]
+  timeOff      DoctorTimeOff[]
 
   @@index([clinicId])
   @@map("doctor")
@@ -313,4 +334,76 @@ model AiSettings {
   clinic   Clinic @relation(fields: [clinicId], references: [id], onDelete: Cascade)
 
   @@map("ai_settings")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DOCTOR SCHEDULE — recurring weekly availability per doctor.
+// One row per (doctor, dayOfWeek). slotDurationMinutes drives how the
+// scheduler bucketizes the start/end window into bookable slots.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model DoctorSchedule {
+  id                  String   @id @default(cuid())
+  dayOfWeek           Int      @map("day_of_week")           // 0 = Sunday … 6 = Saturday
+  startTime           String   @map("start_time")            // "HH:mm" in clinic timezone
+  endTime             String   @map("end_time")              // "HH:mm" in clinic timezone
+  slotDurationMinutes Int      @default(30) @map("slot_duration_minutes")
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  doctorId String @map("doctor_id")
+  doctor   Doctor @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+
+  @@unique([doctorId, dayOfWeek])
+  @@index([doctorId])
+  @@map("doctor_schedule")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DOCTOR TIME OFF — date-range overrides on top of the recurring schedule
+// (vacation, sick days, conferences). Inclusive dates.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model DoctorTimeOff {
+  id        String   @id @default(cuid())
+  startDate DateTime @map("start_date") @db.Date
+  endDate   DateTime @map("end_date") @db.Date
+  reason    String?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  doctorId String @map("doctor_id")
+  doctor   Doctor @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+
+  @@index([doctorId])
+  @@index([startDate, endDate])
+  @@map("doctor_time_off")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// STAFF INVITATION — pending invites from an admin to a new staff member.
+// `token` is the opaque single-use link recipient receives by email.
+// `acceptedAt` flips when they complete signup; the (clinicId, email) unique
+// constraint is intentionally not partial — to re-invite, delete the old row.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model StaffInvitation {
+  id         String    @id @default(cuid())
+  email      String
+  fullName   String    @map("full_name")
+  role       StaffRole
+  token      String    @unique
+  expiresAt  DateTime  @map("expires_at")
+  acceptedAt DateTime? @map("accepted_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  clinicId String @map("clinic_id")
+  clinic   Clinic @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+
+  invitedByStaffId String?      @map("invited_by_staff_id")
+  invitedByStaff   ClinicStaff? @relation(fields: [invitedByStaffId], references: [id], onDelete: SetNull)
+
+  @@unique([clinicId, email])
+  @@index([token])
+  @@map("staff_invitation")
 }

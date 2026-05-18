@@ -1,18 +1,33 @@
-import { useState } from "react";
-import { Mail, Lock, User, Eye, EyeOff } from "lucide-react";
+'use client';
+
+import { useState, useTransition } from "react";
+import { Mail, Lock, User, Eye, EyeOff, Building2, Phone, MapPin, Briefcase } from "lucide-react";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import { AivaLogo } from "../ui/AivaLogo";
 import { motion, AnimatePresence } from "motion/react";
+import { toast } from "sonner";
+import { login, register } from "@/app/(auth)/actions";
 
-interface NewLoginPageProps {
-  onLogin: () => void;
-}
-
-export function NewLoginPage({ onLogin }: NewLoginPageProps) {
+export function NewLoginPage() {
   const [isLogin, setIsLogin] = useState(true);
   const [showPassword, setShowPassword] = useState(false);
+  const [isPending, startTransition] = useTransition();
+
+  const handleLogin = (formData: FormData) => {
+    startTransition(async () => {
+      const result = await login(formData);
+      if (result?.error) toast.error(result.error);
+    });
+  };
+
+  const handleRegister = (formData: FormData) => {
+    startTransition(async () => {
+      const result = await register(formData);
+      if (result?.error) toast.error(result.error);
+    });
+  };
 
   const toggleMode = () => {
     setIsLogin(!isLogin);
@@ -111,19 +126,14 @@ export function NewLoginPage({ onLogin }: NewLoginPageProps) {
                       Register your clinic to get started
                     </p>
 
-                    <form
-                      onSubmit={(e) => {
-                        e.preventDefault();
-                        onLogin();
-                      }}
-                      className="space-y-6"
-                    >
+                    <form action={handleRegister} className="space-y-6">
                       <div className="space-y-2">
                         <Label htmlFor="name">Full Name</Label>
                         <div className="relative">
                           <User className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
                           <Input
                             id="name"
+                            name="fullName"
                             type="text"
                             placeholder="Dr. Sarah Wilson"
                             className="pl-10 h-12"
@@ -140,10 +150,82 @@ export function NewLoginPage({ onLogin }: NewLoginPageProps) {
                           <Mail className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
                           <Input
                             id="email"
+                            name="email"
                             type="email"
                             placeholder="doctor@clinic.com"
                             className="pl-10 h-12"
                             required
+                          />
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="clinicName">Clinic Name</Label>
+                        <div className="relative">
+                          <Building2 className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
+                          <Input
+                            id="clinicName"
+                            name="clinicName"
+                            type="text"
+                            placeholder="Wilson Family Clinic"
+                            className="pl-10 h-12"
+                            required
+                          />
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="clinicPhone">Clinic Phone</Label>
+                        <div className="relative">
+                          <Phone className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
+                          <Input
+                            id="clinicPhone"
+                            name="clinicPhone"
+                            type="tel"
+                            placeholder="+92 300 1234567"
+                            className="pl-10 h-12"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="clinicAddress">Clinic Address</Label>
+                        <div className="relative">
+                          <MapPin className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
+                          <textarea
+                            id="clinicAddress"
+                            name="clinicAddress"
+                            rows={2}
+                            placeholder="123 Main St, Karachi"
+                            className="pl-10 pt-3 pb-3 pr-3 w-full min-h-12 rounded-md border border-input bg-transparent text-sm resize-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="clinicEmail">Clinic Email</Label>
+                        <div className="relative">
+                          <Mail className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
+                          <Input
+                            id="clinicEmail"
+                            name="clinicEmail"
+                            type="email"
+                            placeholder="contact@clinic.com"
+                            className="pl-10 h-12"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="jobTitle">Your Job Title</Label>
+                        <div className="relative">
+                          <Briefcase className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
+                          <Input
+                            id="jobTitle"
+                            name="jobTitle"
+                            type="text"
+                            placeholder="e.g. Practice Manager"
+                            className="pl-10 h-12"
                           />
                         </div>
                       </div>
@@ -156,6 +238,8 @@ export function NewLoginPage({ onLogin }: NewLoginPageProps) {
                           <Lock className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
                           <Input
                             id="password"
+                            name="password"
+                            minLength={8}
                             type={
                               showPassword ? "text" : "password"
                             }
@@ -185,9 +269,10 @@ export function NewLoginPage({ onLogin }: NewLoginPageProps) {
                       >
                         <Button
                           type="submit"
+                          disabled={isPending}
                           className="w-full h-12 text-lg bg-gradient-to-r from-[#27AE60] to-[#56CCF2] hover:opacity-90 shadow-lg"
                         >
-                          Create Account
+                          {isPending ? "Creating…" : "Create Account"}
                         </Button>
                       </motion.div>
                     </form>
@@ -248,13 +333,7 @@ export function NewLoginPage({ onLogin }: NewLoginPageProps) {
                       Login to access your dashboard
                     </p>
 
-                    <form
-                      onSubmit={(e) => {
-                        e.preventDefault();
-                        onLogin();
-                      }}
-                      className="space-y-6"
-                    >
+                    <form action={handleLogin} className="space-y-6">
                       <div className="space-y-2">
                         <Label htmlFor="email">
                           Email Address
@@ -263,6 +342,7 @@ export function NewLoginPage({ onLogin }: NewLoginPageProps) {
                           <Mail className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
                           <Input
                             id="email"
+                            name="email"
                             type="email"
                             placeholder="doctor@clinic.com"
                             className="pl-10 h-12"
@@ -279,6 +359,7 @@ export function NewLoginPage({ onLogin }: NewLoginPageProps) {
                           <Lock className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
                           <Input
                             id="password"
+                            name="password"
                             type={
                               showPassword ? "text" : "password"
                             }
@@ -304,6 +385,7 @@ export function NewLoginPage({ onLogin }: NewLoginPageProps) {
 
                       <div className="flex items-center justify-between text-sm">
                         <label className="flex items-center gap-2 cursor-pointer">
+                          {/* TODO: wire remember-me to session expiry */}
                           <input
                             type="checkbox"
                             className="w-4 h-4 rounded border-2 border-gray-300 text-[#2F80ED] focus:ring-[#2F80ED] focus:ring-offset-0 checked:bg-[#2F80ED] checked:border-[#2F80ED] bg-white"
@@ -312,6 +394,7 @@ export function NewLoginPage({ onLogin }: NewLoginPageProps) {
                             Remember me
                           </span>
                         </label>
+                        {/* TODO: implement password reset */}
                         <a
                           href="#"
                           className="text-[#2F80ED] hover:underline"
@@ -326,9 +409,10 @@ export function NewLoginPage({ onLogin }: NewLoginPageProps) {
                       >
                         <Button
                           type="submit"
+                          disabled={isPending}
                           className="w-full h-12 text-lg bg-gradient-to-r from-[#2F80ED] to-[#56CCF2] hover:opacity-90 shadow-lg"
                         >
-                          Login
+                          {isPending ? "Signing in…" : "Login"}
                         </Button>
                       </motion.div>
                     </form>

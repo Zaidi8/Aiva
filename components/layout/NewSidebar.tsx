@@ -29,11 +29,19 @@ import {
   AvatarFallback,
   AvatarImage,
 } from "../ui/avatar";
+import { signout } from "@/app/(auth)/actions";
+
+export interface SidebarUserProfile {
+  name: string;
+  role: string;
+  email: string;
+  avatar?: string;
+}
 
 interface SidebarProps {
   currentPage: PageType;
   onNavigate: (page: PageType, subPage?: string) => void;
-  onLogout: () => void;
+  userProfile: SidebarUserProfile;
 }
 
 const mainMenuItems = [
@@ -76,18 +84,11 @@ const bottomMenuItems = [
 export function NewSidebar({
   currentPage,
   onNavigate,
-  onLogout,
+  userProfile,
 }: SidebarProps) {
   const [isMobileMenuOpen, setIsMobileMenuOpen] =
     useState(false);
   const [isCollapsed, setIsCollapsed] = useState(false);
-
-  const userProfile = {
-    name: "Dr. Sarah Wilson",
-    role: "Admin",
-    avatar: "", // Empty for initials fallback
-    email: "sarah.wilson@clinic.com",
-  };
 
   return (
     <>
@@ -265,12 +266,14 @@ export function NewSidebar({
                 }`}
               >
                 <Avatar className="w-10 h-10 flex-shrink-0">
-                  <AvatarImage src={userProfile.avatar} />
+                  <AvatarImage src={userProfile.avatar ?? ""} />
                   <AvatarFallback className="bg-gradient-to-br from-[#2F80ED] to-[#56CCF2] text-white">
                     {userProfile.name
                       .split(" ")
                       .map((n) => n[0])
-                      .join("")}
+                      .join("")
+                      .slice(0, 2)
+                      .toUpperCase()}
                   </AvatarFallback>
                 </Avatar>
                 <AnimatePresence>
@@ -311,13 +314,17 @@ export function NewSidebar({
                 Profile Settings
               </DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem
-                onClick={onLogout}
-                className="text-red-600"
-              >
-                <LogOut className="w-4 h-4 mr-2" />
-                Logout
-              </DropdownMenuItem>
+              <form action={signout}>
+                <DropdownMenuItem asChild className="text-red-600">
+                  <button
+                    type="submit"
+                    className="w-full flex items-center cursor-pointer"
+                  >
+                    <LogOut className="w-4 h-4 mr-2" />
+                    Logout
+                  </button>
+                </DropdownMenuItem>
+              </form>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>

@@ -42,3 +42,6 @@ next-env.d.ts
 
 .playwright-mcp
 /app/generated/prisma
+
+# MCP server config — local-only
+.mcp.json
