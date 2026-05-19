@@ -1,5 +1,8 @@
-import { useState } from 'react';
-import { Search, Plus, User, Phone, Calendar, Eye, Filter } from 'lucide-react';
+'use client';
+
+import { useState, useMemo, useTransition } from 'react';
+import { useRouter } from 'next/navigation';
+import { Search, Plus, User, Phone, Calendar, Eye } from 'lucide-react';
 import { Card, CardContent } from '../ui/card';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
@@ -10,11 +13,17 @@ import { PaginationBar } from '../ui/PaginationBar';
 import { AddPatientModal } from '../ui/AddPatientModal';
 import { PatientRecordModal } from '../ui/PatientRecordModal';
 import DateRangePicker from '../ui/date-range-picker';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { motion } from 'motion/react';
-import { mockPatients } from '../../data/mockData';
+import type { Patient as PrismaPatient } from '@prisma/client';
 
 interface NewPatientsPageProps {
+  // Props supplied by the server-component wrapper at
+  // app/(dashboard)/patients/page.tsx. Mutations (create/update/delete)
+  // call router.refresh() which re-runs the server component and rehydrates
+  // these props with fresh data — we never fetch on the client.
+  initialPatients: PrismaPatient[];
+  initialTotal: number;
+  initialQuery?: string;
   onNavigate?: (page: string) => void;
 }
 
@@ -23,40 +32,93 @@ interface DateRange {
   end: string | null;
 }
 
-export function NewPatientsPage({ onNavigate }: NewPatientsPageProps) {
-  const [searchQuery, setSearchQuery] = useState('');
-  const [dateRange, setDateRange] = useState<DateRange>({ start: null, end: null });
+// Compact initials from a full name, used in the avatar bubble.
+function initials(fullName: string): string {
+  return fullName
+    .split(' ')
+    .map((n) => n[0])
+    .filter(Boolean)
+    .slice(0, 2)
+    .join('')
+    .toUpperCase();
+}
+
+function formatDate(d: Date | string | null | undefined): string {
+  if (!d) return '—';
+  const date = typeof d === 'string' ? new Date(d) : d;
+  if (Number.isNaN(date.getTime())) return '—';
+  return date.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
+}
+
+export function NewPatientsPage({
+  initialPatients,
+  initialTotal,
+  initialQuery = '',
+}: NewPatientsPageProps) {
+  const router = useRouter();
+  // useTransition keeps router.refresh() non-blocking so the UI stays
+  // responsive while Next re-runs the server component.
+  const [isPending, startTransition] = useTransition();
+
+  // Client-side search is fine for the first page (≤50 rows); for richer
+  // server-side filtering we could pipe the input into the ?q= param via
+  // router.push, but the current scope is "swap data source", not "rebuild
+  // search UX".
+  const [searchQuery, setSearchQuery] = useState(initialQuery);
+  const [dateRange, setDateRange] = useState<DateRange>({
+    start: null,
+    end: null,
+  });
   const [showEmptyState, setShowEmptyState] = useState(false);
   const [isAddPatientModalOpen, setIsAddPatientModalOpen] = useState(false);
-  const [selectedPatient, setSelectedPatient] = useState<any>(null);
+  const [selectedPatient, setSelectedPatient] = useState<PrismaPatient | null>(
+    null,
+  );
   const [currentPage, setCurrentPage] = useState(1);
-  const [showLargeDataset, setShowLargeDataset] = useState(false);
   const [itemsPerPage, setItemsPerPage] = useState(10);
 
-  // Generate large dataset if enabled
-  const largeDataset = showLargeDataset
-    ? Array.from({ length: 50 }, (_, i) => ({
-        ...mockPatients[i % mockPatients.length],
-        id: `${i + 1}`,
-        name: `${mockPatients[i % mockPatients.length].name} ${i + 1}`,
-      }))
-    : mockPatients;
+  // Re-fetch the server component after a mutation. The route is server-rendered
+  // by app/(dashboard)/patients/page.tsx — router.refresh() invalidates the
+  // cached RSC payload and replays the data fetch.
+  const refresh = () => {
+    startTransition(() => {
+      router.refresh();
+    });
+  };
 
-  const filteredPatients = (showEmptyState ? [] : largeDataset).filter((patient) => {
-    const matchesSearch =
-      patient.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      patient.phone.includes(searchQuery);
-    const matchesDateRange =
-      !dateRange.start || !dateRange.end
-        ? true
-        : new Date(patient.lastVisit) >= new Date(dateRange.start) && new Date(patient.lastVisit) <= new Date(dateRange.end);
-    return matchesSearch && matchesDateRange;
-  });
+  const filteredPatients = useMemo(() => {
+    const source = showEmptyState ? [] : initialPatients;
+    const q = searchQuery.trim().toLowerCase();
+    return source.filter((patient) => {
+      const matchesSearch =
+        !q ||
+        patient.fullName.toLowerCase().includes(q) ||
+        patient.phoneNumber.toLowerCase().includes(q);
+      const matchesDateRange =
+        !dateRange.start || !dateRange.end
+          ? true
+          : (() => {
+              const created = new Date(patient.createdAt).getTime();
+              return (
+                created >= new Date(dateRange.start).getTime() &&
+                created <= new Date(dateRange.end).getTime()
+              );
+            })();
+      return matchesSearch && matchesDateRange;
+    });
+  }, [initialPatients, showEmptyState, searchQuery, dateRange]);
 
-  const totalPages = Math.ceil(filteredPatients.length / itemsPerPage);
+  const totalPages = Math.max(
+    1,
+    Math.ceil(filteredPatients.length / itemsPerPage),
+  );
   const paginatedPatients = filteredPatients.slice(
     (currentPage - 1) * itemsPerPage,
-    currentPage * itemsPerPage
+    currentPage * itemsPerPage,
   );
 
   return (
@@ -65,7 +127,7 @@ export function NewPatientsPage({ onNavigate }: NewPatientsPageProps) {
         title="Patient Records"
         description="Manage patient information and medical history"
         actionButton={
-          <Button 
+          <Button
             className="bg-gradient-to-r from-[#2F80ED] to-[#56CCF2] hover:opacity-90 shadow-md"
             onClick={() => setIsAddPatientModalOpen(true)}
           >
@@ -91,20 +153,33 @@ export function NewPatientsPage({ onNavigate }: NewPatientsPageProps) {
               className="pl-10 h-12"
             />
           </div>
-          <DateRangePicker
-            value={dateRange}
-            onChange={setDateRange}
-          />
+          <DateRangePicker value={dateRange} onChange={setDateRange} />
         </motion.div>
 
         {/* Stats */}
         {!showEmptyState && (
           <div className="grid grid-cols-1 sm:grid-cols-4 gap-6">
             {[
-              { label: 'Total Patients', value: filteredPatients.length, color: '#2F80ED' },
-              { label: 'Active Today', value: '8', color: '#27AE60' },
-              { label: 'Upcoming Visits', value: '12', color: '#56CCF2' },
-              { label: 'New This Month', value: '24', color: '#F2994A' },
+              {
+                label: 'Total Patients',
+                value: initialTotal,
+                color: '#2F80ED',
+              },
+              {
+                label: 'Showing',
+                value: filteredPatients.length,
+                color: '#27AE60',
+              },
+              {
+                label: 'Page',
+                value: `${currentPage} / ${totalPages}`,
+                color: '#56CCF2',
+              },
+              {
+                label: 'Refresh',
+                value: isPending ? 'Loading...' : 'Ready',
+                color: '#F2994A',
+              },
             ].map((stat, index) => (
               <motion.div
                 key={index}
@@ -119,7 +194,10 @@ export function NewPatientsPage({ onNavigate }: NewPatientsPageProps) {
                       className="w-10 h-10 rounded-lg mb-3 flex items-center justify-center"
                       style={{ backgroundColor: `${stat.color}15` }}
                     >
-                      <User className="w-5 h-5" style={{ color: stat.color }} />
+                      <User
+                        className="w-5 h-5"
+                        style={{ color: stat.color }}
+                      />
                     </div>
                     <p className="text-sm text-gray-600 mb-1">{stat.label}</p>
                     <p className="text-3xl text-[#333333]">{stat.value}</p>
@@ -137,11 +215,11 @@ export function NewPatientsPage({ onNavigate }: NewPatientsPageProps) {
               <User className="w-16 h-16 text-gray-300 mx-auto mb-4" />
               <h3 className="text-xl text-gray-600 mb-2">No Patients Found</h3>
               <p className="text-gray-500 mb-6">
-                {showEmptyState
+                {initialPatients.length === 0
                   ? 'Start by adding your first patient.'
                   : 'Try adjusting your search query.'}
               </p>
-              <Button 
+              <Button
                 className="bg-[#2F80ED] hover:bg-[#2F80ED]/90"
                 onClick={() => setIsAddPatientModalOpen(true)}
               >
@@ -164,24 +242,27 @@ export function NewPatientsPage({ onNavigate }: NewPatientsPageProps) {
                   <CardContent className="p-6">
                     <div className="flex items-start gap-6 flex-wrap">
                       <div className="w-16 h-16 bg-gradient-to-br from-[#2F80ED] to-[#56CCF2] rounded-full flex items-center justify-center text-white text-xl shadow-md flex-shrink-0">
-                        {patient.name.split(' ').map((n) => n[0]).join('')}
+                        {initials(patient.fullName)}
                       </div>
 
                       <div className="flex-1 min-w-0 space-y-3">
                         <div className="flex items-start justify-between flex-wrap gap-2">
                           <div>
                             <h3 className="text-xl text-[#333333] font-medium mb-1">
-                              {patient.name}
+                              {patient.fullName}
                             </h3>
                             <div className="flex items-center gap-4 text-sm text-gray-600">
                               <span>
-                                {patient.age} years • {patient.gender}
+                                {patient.age != null
+                                  ? `${patient.age} years`
+                                  : 'Age unknown'}
+                                {patient.gender ? ` • ${patient.gender}` : ''}
                               </span>
                             </div>
                           </div>
-                          <Button 
-                            variant="outline" 
-                            size="sm" 
+                          <Button
+                            variant="outline"
+                            size="sm"
                             className="hover:bg-[#2F80ED] hover:text-white transition-all"
                             onClick={() => setSelectedPatient(patient)}
                           >
@@ -193,29 +274,30 @@ export function NewPatientsPage({ onNavigate }: NewPatientsPageProps) {
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                           <div className="flex items-center gap-2 text-sm text-gray-600">
                             <Phone className="w-4 h-4" />
-                            {patient.phone}
+                            {patient.phoneNumber}
                           </div>
                           <div className="flex items-center gap-2 text-sm text-gray-600">
                             <Calendar className="w-4 h-4" />
-                            Last visit: {patient.lastVisit}
+                            Added: {formatDate(patient.createdAt)}
                           </div>
                         </div>
 
-                        {patient.upcomingAppointment && (
-                          <div className="p-3 bg-[#27AE60]/10 rounded-lg border border-[#27AE60]/20">
-                            <p className="text-sm text-[#27AE60] font-medium">
-                              Upcoming: {patient.upcomingAppointment}
-                            </p>
-                          </div>
-                        )}
-
-                        <div className="flex items-center gap-2 flex-wrap">
-                          {patient.medicalHistory.slice(0, 3).map((condition, i) => (
-                            <Badge key={i} variant="outline" className="text-xs">
-                              {condition}
-                            </Badge>
-                          ))}
-                        </div>
+                        {patient.medicalHistory &&
+                          patient.medicalHistory.length > 0 && (
+                            <div className="flex items-center gap-2 flex-wrap">
+                              {patient.medicalHistory
+                                .slice(0, 3)
+                                .map((condition, i) => (
+                                  <Badge
+                                    key={i}
+                                    variant="outline"
+                                    className="text-xs"
+                                  >
+                                    {condition}
+                                  </Badge>
+                                ))}
+                            </div>
+                          )}
                       </div>
                     </div>
                   </CardContent>
@@ -243,7 +325,9 @@ export function NewPatientsPage({ onNavigate }: NewPatientsPageProps) {
 
       <DevControls
         onEmptyStateToggle={() => setShowEmptyState(!showEmptyState)}
-        onLargeDataToggle={() => setShowLargeDataset(!showLargeDataset)}
+        onLargeDataToggle={() => {
+          /* large dataset toggle is a mock-data only feature, disabled in live mode */
+        }}
         currentPage={currentPage}
         totalPages={totalPages}
       />
@@ -251,6 +335,7 @@ export function NewPatientsPage({ onNavigate }: NewPatientsPageProps) {
       <AddPatientModal
         isOpen={isAddPatientModalOpen}
         onClose={() => setIsAddPatientModalOpen(false)}
+        onCreated={refresh}
       />
 
       {/* Patient Full Record Modal */}
@@ -258,6 +343,7 @@ export function NewPatientsPage({ onNavigate }: NewPatientsPageProps) {
         isOpen={!!selectedPatient}
         patient={selectedPatient}
         onClose={() => setSelectedPatient(null)}
+        onMutated={refresh}
       />
     </div>
   );

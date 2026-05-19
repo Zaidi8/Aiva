@@ -264,57 +264,9 @@ export const mockAppointments: Appointment[] = [
   { id: '8', patient: 'Maria Garcia', patientPhone: '555-0108', time: '09:30 AM', doctor: 'Dr. Brown', type: 'General Checkup', status: 'cancelled' },
 ];
 
-export const mockPatients: Patient[] = [
-  {
-    id: '1',
-    name: 'John Smith',
-    age: 38,
-    gender: 'Male',
-    phone: '555-0101',
-    lastVisit: 'Oct 15, 2024',
-    upcomingAppointment: 'Nov 15, 2024 at 2:00 PM',
-    medicalHistory: ['Hypertension', 'Regular checkups'],
-  },
-  {
-    id: '2',
-    name: 'Sarah Johnson',
-    age: 45,
-    gender: 'Female',
-    phone: '555-0102',
-    lastVisit: 'Oct 22, 2024',
-    upcomingAppointment: 'Nov 10, 2024 at 10:30 AM',
-    medicalHistory: ['Diabetes Type 2', 'Annual physicals'],
-  },
-  {
-    id: '3',
-    name: 'Michael Davis',
-    age: 52,
-    gender: 'Male',
-    phone: '555-0103',
-    lastVisit: 'Sep 30, 2024',
-    upcomingAppointment: 'Nov 12, 2024 at 10:00 AM',
-    medicalHistory: ['High cholesterol', 'Heart condition monitoring'],
-  },
-  {
-    id: '4',
-    name: 'Emily Wilson',
-    age: 29,
-    gender: 'Female',
-    phone: '555-0104',
-    lastVisit: 'Nov 5, 2024',
-    medicalHistory: ['Allergies', 'Preventive care'],
-  },
-  {
-    id: '5',
-    name: 'David Brown',
-    age: 67,
-    gender: 'Male',
-    phone: '555-0105',
-    lastVisit: 'Oct 28, 2024',
-    upcomingAppointment: 'Nov 8, 2024 at 11:00 AM',
-    medicalHistory: ['Arthritis', 'Regular medication review'],
-  },
-];
+// mockPatients removed in Phase 2 — patients now load from the live API
+// (see app/(dashboard)/patients/page.tsx -> listPatients). The Patient type
+// export remains for other modules that still reference it.
 
 export const mockNotifications: Notification[] = [
   {
