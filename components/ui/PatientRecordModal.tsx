@@ -3,7 +3,6 @@
 import { toast } from 'sonner';
 import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
 import { Edit2, Trash2 } from 'lucide-react';
 import {
   Dialog,
@@ -25,10 +24,7 @@ import {
 } from './select';
 import { motion, AnimatePresence } from 'motion/react';
 import type { Patient as PrismaPatient } from '@prisma/client';
-import {
-  updatePatientSchema,
-  type UpdatePatientInput,
-} from '@/lib/validations/patient';
+import type { UpdatePatientInput } from '@/lib/validations/patient';
 import { apiDelete, apiPatch, ApiError } from '@/lib/client/fetcher';
 
 interface PatientRecordModalProps {
@@ -74,9 +70,11 @@ export function PatientRecordModal({
   // second click within ~3s actually fires the DELETE.
   const [confirmDelete, setConfirmDelete] = useState(false);
 
+  // No resolver: the API zod schema has a different shape (typed
+  // medicalHistory[], numeric age) than the form. Server-side 422 fields
+  // are surfaced via form.setError below.
   const form = useForm<EditFormValues>({
-    resolver: zodResolver(updatePatientSchema as unknown as never),
-    mode: 'onBlur',
+    mode: 'onSubmit',
   });
 
   // Whenever the modal opens (or the selected patient changes), reset the

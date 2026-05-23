@@ -3,17 +3,13 @@
 import { toast } from 'sonner';
 import { useEffect } from 'react';
 import { useForm } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './dialog';
 import { Button } from './button';
 import { Input } from './input';
 import { Label } from './label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './select';
 import { apiPost, ApiError } from '@/lib/client/fetcher';
-import {
-  createPatientSchema,
-  type CreatePatientInput,
-} from '@/lib/validations/patient';
+import type { CreatePatientInput } from '@/lib/validations/patient';
 
 interface AddPatientModalProps {
   isOpen: boolean;
@@ -46,15 +42,13 @@ const EMPTY_VALUES: AddPatientFormValues = {
 };
 
 export function AddPatientModal({ isOpen, onClose, onCreated }: AddPatientModalProps) {
+  // No resolver: the API zod schema lives on a different shape (typed
+  // `medicalHistory: string[]`, numeric `age`) than the form (`medicalHistoryText: string`,
+  // string `age`). We post the adapted payload and surface server-side 422
+  // field errors via `form.setError` in the catch block.
   const form = useForm<AddPatientFormValues>({
-    // The zod schema lives on the API; we adapt the form payload before submit
-    // so we still validate against the exact same schema (no drift).
-    resolver: zodResolver(
-      createPatientSchema.transform((v) => v) as unknown as never,
-    ),
     defaultValues: EMPTY_VALUES,
-    // Validation runs onBlur for snappier UX; submit always re-validates.
-    mode: 'onBlur',
+    mode: 'onSubmit',
   });
 
   // Reset whenever the modal closes so re-opening starts fresh.
@@ -65,6 +59,7 @@ export function AddPatientModal({ isOpen, onClose, onCreated }: AddPatientModalP
   const isSubmitting = form.formState.isSubmitting;
 
   const onSubmit = form.handleSubmit(async (values) => {
+    form.clearErrors();
     // Translate the form's loose shape into a strict CreatePatientInput.
     const payload: CreatePatientInput = {
       fullName: values.fullName.trim(),
