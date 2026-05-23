@@ -1,201 +1,218 @@
 # Aiva — Project Progress
 
-_Last audited: 2026-05-18 by audit-project agent._
-_Commit at audit time: `4587ac1` (with substantial uncommitted work — see [git status](#) below)._
+_Last audited: 2026-05-23 by audit-project agent._
+_Commit at audit time: 1582977_
 
 ## 1. Executive summary
 
-Aiva is roughly **35–40% complete end-to-end**. The **frontend is mature** — every dashboard page is fully designed and interactive (login, dashboard, appointments, patients, AI receptionist, analytics, settings, UI kit) and the **multi-tenant auth/onboarding backend has just landed** ([Supabase Auth + Prisma transactional clinic provisioning](lib/auth.ts), [edge proxy gate](proxy.ts), [`clinicWhere` scoping helper](lib/clinic-scope.ts)). The biggest gap is that **every dashboard page still renders from `data/mockData.ts`** and there are **zero Route Handlers under `app/api/`** — read/write paths to Prisma have not been built. For the AI receptionist, the **data model is ready** ([`CallLog`](prisma/schema.prisma#L262) and [`AiSettings`](prisma/schema.prisma#L322) exist) but **none of the runtime seams** (webhook endpoints, audio storage, real-time push, background jobs, outbound notifications) are wired. The single biggest blocker to AI-module integration is the absence of any API surface — every domain needs CRUD routes and server-rendered reads before a voice provider can call in.
+The architecture milestone the user set for this phase is largely landed. Auth + multi-tenancy, validation, tenant-scoped helpers, and the full REST surface for Patients / Doctors / Appointments (incl. reschedule + slot availability) / AI Settings / inbound Voice webhooks are all implemented. The Phase 8 voice seams — `Clinic.voicePhone` (unique), `CallLog.clinicId` + `providerCallId` + `updatedAt`, the `WebhookEvent` idempotency table, the shared-secret webhook guard, and three `/api/voice/*` route handlers — are migrated, wired, and verified end-to-end with curl. Overall completeness is roughly **70–75%**: backend foundations are essentially complete; the front-end conversion lags (only Patients is wired to real data so far). The biggest blockers to dropping the AI module in are not architectural — they are storage (recording URLs), realtime push (live call view), and FE wire-up for the Settings → AI tab and Appointments page.
 
 ## 2. Tech stack (verified this run)
 
-- **Frontend**: Next.js `16.1.6` (App Router), React `19.2.3`, TypeScript `^5` (strict), Tailwind CSS `^4` (PostCSS), `motion` (animations), `recharts ^2.15.2`, `react-hook-form ^7.55.0`, `zod ^4.4.2`, `sonner ^2.0.3`, `lucide-react ^0.487.0`, shadcn/ui via `@radix-ui/*` + `class-variance-authority ^0.7.1`, `date-fns`, `cmdk`, `vaul`. ([package.json](package.json))
-- **Backend**: Next.js Route Handlers + Server Actions (only auth actions exist today — [`app/(auth)/actions.ts`](app/(auth)/actions.ts)), Prisma `^6.19.3` ORM with Postgres (`provider = "postgresql"`).
-- **Database / Auth**: Supabase Postgres + Supabase Auth via `@supabase/ssr ^0.10.2` and `@supabase/supabase-js ^2.105.1`. Connection pool through pgbouncer ([`.env.example`](.env.example#L22)).
-- **Notable libraries**: `embla-carousel-react`, `react-day-picker`, `react-resizable-panels`, `input-otp`, `next-themes`, `tailwind-merge`.
-- **Missing entirely from deps**: any test runner (no Vitest/Jest/Playwright in `package.json` despite a `.playwright-mcp/` cache dir), no logger, no rate-limit lib, no queue lib, no SMS/email provider SDK, no AI/voice SDK.
+- **Frontend**: Next.js [16.1.6](package.json#L50), React [19.2.3](package.json#L52), TypeScript [^5](package.json#L72) (strict), Tailwind CSS v4, shadcn/ui (Radix primitives), `sonner` [^2.0.3](package.json#L58), `recharts` [^2.15.2](package.json#L57), `react-hook-form` [^7.55.0](package.json#L55) + `@hookform/resolvers` [^5.2.2](package.json#L12), `zod` [^4.4.2](package.json#L61).
+- **Backend**: Next.js Route Handlers + Server Actions, **Prisma** [^6.19.3](package.json#L13), Node.js runtime for all `/api/*` routes.
+- **Database / Auth**: Supabase Postgres + Supabase Auth via `@supabase/ssr` [^0.10.2](package.json#L40) and `@supabase/supabase-js` [^2.105.1](package.json#L41).
+- **Notable libraries**: `lucide-react`, `date-fns`, `motion`, `recharts`, `class-variance-authority`, `cmdk`, `embla-carousel-react`, `vaul`.
 
 ## 3. Data model (Prisma)
 
-Source: [prisma/schema.prisma](prisma/schema.prisma). Two applied migrations: [`20260504095155_init`](prisma/migrations/20260504095155_init/migration.sql) and [`20260508061122_add_team_management_foundation`](prisma/migrations/20260508061122_add_team_management_foundation/migration.sql).
+Source: [prisma/schema.prisma](prisma/schema.prisma).
 
 | Model | Purpose | Status | Notes |
 |---|---|---|---|
-| [`Clinic`](prisma/schema.prisma#L103) | Tenant root; holds name/address/phone/email/`timezone` (default `Asia/Karachi`). | ✅ done | Designed as single-row-per-tenant; multi-clinic is "add clinicId FKs later". |
-| [`ClinicStaff`](prisma/schema.prisma#L130) | Dashboard user; links Supabase `auth.users.id` via `authUserId`. Has `role`, `jobTitle`, soft-delete `deactivatedAt`. | ✅ done | `getCurrentStaff` filters out deactivated rows. |
-| [`Patient`](prisma/schema.prisma#L157) | Patient record (name, age, gender, phone, email, address, `medicalHistory: String[]`). Scoped to clinic. | ✅ schema only | No read/write path — UI uses `mockPatients`. |
-| [`Doctor`](prisma/schema.prisma#L187) | Doctor profile with optional `clinicStaffId` link for self-login. `availableSlots` + `workingHours` JSON cols are marked **DEPRECATED** in favor of `DoctorSchedule`/`DoctorTimeOff`. | 🟡 partial | Schema migrated, no API surface, deprecated JSON cols still present. |
-| [`Appointment`](prisma/schema.prisma#L224) | `scheduledAt` + `durationMin` + `type` + `status`. **DB-level double-booking prevention** via `@@unique([doctorId, scheduledAt])`. | ✅ schema only | No read/write path; UI uses `mockAppointments`. |
-| [`CallLog`](prisma/schema.prisma#L262) | Voice-call record: `patientPhone`, `durationSec`, `detectedIntent`, `outcome`, `transcript: Json`, `sentiment`, `qualityRating`, `recordingUrl`, `startedAt`, `endedAt`. Patient + Appointment FKs both nullable. | 🟡 schema only | Critical AI-module table exists but **no write path, no webhook**, no storage for `recordingUrl`. |
-| [`Notification`](prisma/schema.prisma#L295) | Channel-agnostic outbound message log (`SMS` / `Push` / `Email`), status tracked. | 🟡 schema only | No provider client wired; no dispatcher. |
-| [`AiSettings`](prisma/schema.prisma#L322) | 1:1 with Clinic. Persona (`agentName`), `greetingMessage`, toggles (`autoBook`, `sendConfirmations`, `handleRescheduling`, `emergencyTransfer`). Seeded by `register` action. | 🟡 partial | Row created on signup, but Settings → AI tab UI ([NewSettingsPage.tsx#L225](components/pages/NewSettingsPage.tsx#L225)) is hard-coded `defaultValue` inputs — does not read or write `AiSettings`. |
-| [`DoctorSchedule`](prisma/schema.prisma#L345) | Recurring weekly slots per doctor (`dayOfWeek`, `startTime/endTime`, `slotDurationMinutes`). | 🟡 schema only | No UI, no API. |
-| [`DoctorTimeOff`](prisma/schema.prisma#L367) | Date-range overrides (vacation/sick days). | 🟡 schema only | No UI, no API. |
-| [`StaffInvitation`](prisma/schema.prisma#L390) | Email + token invite flow with `expiresAt`/`acceptedAt`; unique on `(clinicId, email)`. | 🟡 schema only | No `sendInvite`/`acceptInvite` Server Action, no UI on Settings page, no email send. |
+| `Clinic` | Tenant root; now carries `voicePhone` (unique) for inbound-call → clinic resolution | done | `voicePhone` [schema.prisma#L113](prisma/schema.prisma#L113); migration [20260523120000](prisma/migrations/20260523120000_add_voice_phone_and_webhook_events/migration.sql#L8) |
+| `ClinicStaff` | Dashboard user; FK to Supabase `auth.users` via `authUserId`; soft-delete via `deactivatedAt` | done | [schema.prisma#L136](prisma/schema.prisma#L136) |
+| `Patient` | Patient records; `phoneNumber` indexed for voice agent lookup | done | [schema.prisma#L163](prisma/schema.prisma#L163) |
+| `Doctor` | Doctors; soft-delete via `deactivatedAt`; deprecated `availableSlots/workingHours` JSON columns retained until `DoctorSchedule` adoption is universal | done | [schema.prisma#L193](prisma/schema.prisma#L193) |
+| `Appointment` | DB-level double-booking prevented via `@@unique([doctorId, scheduledAt])` | done | [schema.prisma#L230](prisma/schema.prisma#L230) |
+| `CallLog` | Now tenant-keyed (`clinicId` NOT NULL FK CASCADE), `providerCallId` @unique, `updatedAt`, defaulted `outcome/durationSec` | done | [schema.prisma#L268](prisma/schema.prisma#L268); migration [20260523120000](prisma/migrations/20260523120000_add_voice_phone_and_webhook_events/migration.sql#L14) |
+| `Notification` | Multi-channel notification log (SMS/Email/Push) | partial | Schema only — no sender, no queue, no API endpoint yet |
+| `AiSettings` | 1:1 per-clinic singleton; auto-bootstrapped at register | done | [schema.prisma#L339](prisma/schema.prisma#L339) |
+| `DoctorSchedule` | Weekly recurring availability used by `computeAvailability` | done | [schema.prisma#L362](prisma/schema.prisma#L362); used in [queries.ts#L88](lib/appointments/queries.ts#L88) |
+| `DoctorTimeOff` | Date-range overrides on top of recurring schedule | done | [schema.prisma#L384](prisma/schema.prisma#L384) |
+| `StaffInvitation` | Pending email invitations from admins | partial | Schema only — no acceptance flow, no email, no API |
+| `WebhookEvent` | NEW — idempotency log for inbound webhooks (`providerEventId` @unique) | done | [schema.prisma#L436](prisma/schema.prisma#L436); migration [20260523120000](prisma/migrations/20260523120000_add_voice_phone_and_webhook_events/migration.sql#L31) |
 
-Enums defined: `Gender`, `StaffRole` (`Admin`/`Doctor`/`Receptionist`), `AppointmentType`, `AppointmentStatus`, `CallType`, `CallOutcome`, `CallSentiment`, `NotificationType`, `NotificationStatus`, `NotificationChannel`.
-
-**Models that should exist for the AI module but don't yet:**
-- A dedicated `CallEvent` / `CallTurn` table — currently transcripts are stored as opaque `Json` on `CallLog.transcript`. Fine for an MVP but hard to query (e.g. "all turns where intent flipped to escalation").
-- A `WebhookEvent` / inbound-event log for idempotency and replay when the voice provider retries.
-- A `BackgroundJob` / `Job` queue table (or a Postgres-based queue via `pg_cron` / `pgmq`) — none exists, so post-call summarization/reminders have nowhere to run.
-- A `StorageObject` / `Recording` table if recordings need provenance metadata beyond a URL string.
-- An `AuditLog` table — none exists, which will become a HIPAA-style problem fast.
+Models that **should exist for the AI module** but don't yet:
+- A normalized `Transcript` / `CallTurn` table (currently turns are appended to `CallLog.transcript` JSON — works, but harder to query/index by role/text).
+- `AuditLog` (deferred — security/compliance follow-up).
+- No dedicated recording-storage descriptor (the URL is on `CallLog.recordingUrl` but there is no Supabase Storage bucket / signed-URL helper).
 
 ## 4. Frontend status (per route)
 
-All `(dashboard)/*/page.tsx` files are thin client wrappers; real UI lives in `components/pages/New*.tsx`. None of them perform server-side data fetching today — they all render mock data on the client.
-
 | Route | Page component | Data source | Status | Gaps |
 |---|---|---|---|---|
-| `/` | [`app/page.tsx`](app/page.tsx) | n/a | ✅ done | Redirects to `/auth`. |
-| `/auth` | [`NewLoginPage`](components/pages/NewLoginPage.tsx) via [`app/(auth)/auth/page.tsx`](app/(auth)/auth/page.tsx) | Server Actions `login`/`register` | ✅ done | Combined login + clinic registration in one component. |
-| `/dashboard` | [`NewDashboardPage`](components/pages/NewDashboardPage.tsx) | `mockAppointments` ([line 10](components/pages/NewDashboardPage.tsx#L10)) | 🟡 UI only | Stats are literal numbers (`value: 24`); no Prisma reads. |
-| `/appointments` | [`ImprovedAppointmentsPage`](components/pages/ImprovedAppointmentsPage.tsx) | `mockAppointments` ([line 19](components/pages/ImprovedAppointmentsPage.tsx#L19)) | 🟡 UI only | Note: the route uses `Improved*`, not `New*` — exception to the convention. Modals (`NewAppointmentModal`, `AppointmentDetailsModal`) don't persist. |
-| `/patients` | [`NewPatientsPage`](components/pages/NewPatientsPage.tsx) | `mockPatients` ([line 16](components/pages/NewPatientsPage.tsx#L16)) | 🟡 UI only | `AddPatientModal`/`PatientRecordModal` don't persist. |
-| `/ai-receptionist` | [`NewAIReceptionistPage`](components/pages/NewAIReceptionistPage.tsx) | `mockCalls`, `mockNotifications` ([line 36](components/pages/NewAIReceptionistPage.tsx#L36)) | 🟡 UI only | Renders call list, transcript pane, sentiment, recording playback affordance — all fake. The page that drives the entire product story has no live wire-up. |
-| `/analytics` | [`NewAnalyticsPage`](components/pages/NewAnalyticsPage.tsx) | Inline hard-coded arrays (`appointmentData`, etc.) at [line 24](components/pages/NewAnalyticsPage.tsx#L24) | 🟡 UI only | Recharts dashboards with literal arrays; no query layer. |
-| `/settings` | [`NewSettingsPage`](components/pages/NewSettingsPage.tsx) | None — all `defaultValue=""` | 🟡 UI only | 5 tabs (`profile`, `notifications`, `security`, `ai`, `appearance`); save button is `toast.success(...)` placeholder ([line 27](components/pages/NewSettingsPage.tsx#L27)). |
-| `/ui-kit` | [`NewUIKitPage`](components/pages/NewUIKitPage.tsx) | n/a | ✅ done | Component showcase; not user-facing. |
-
-Legacy unused page components present in `components/pages/`: `LoginPage.tsx`, `AIReceptionistPage.tsx`, `AnalyticsPage.tsx`, `AppointmentsPage.tsx`, `DashboardPage.tsx`, `PatientsPage.tsx`, `SettingsPage.tsx`, `UIKitPage.tsx`, `NotificationsPage.tsx`. Per convention these are not active — only `New*` (and `Improved*` for appointments) are reachable.
+| `/auth` | `NewLoginPage` ([page.tsx](app/(auth)/auth/page.tsx)) | server actions | done | Email-confirm flow not surfaced in UI |
+| `/dashboard` | `NewDashboardPage` | `mockAppointments` ([NewDashboardPage.tsx#L10](components/pages/NewDashboardPage.tsx#L10)) | partial | Still mock; needs to read from `/api/appointments` summary |
+| `/appointments` | `ImprovedAppointmentsPage` | `mockAppointments` ([ImprovedAppointmentsPage.tsx#L16](components/pages/ImprovedAppointmentsPage.tsx#L16)) | partial | Backend complete; FE conversion deferred |
+| `/patients` | `NewPatientsPage` | Prisma via server component + `/api/patients` for mutations ([page.tsx](app/(dashboard)/patients/page.tsx)) | done | Verified end-to-end via Playwright |
+| `/ai-receptionist` | `NewAIReceptionistPage` | `mockCalls`, `mockNotifications` ([NewAIReceptionistPage.tsx#L36](components/pages/NewAIReceptionistPage.tsx#L36)) | partial | No realtime channel; no read from `lib/calls/queries.ts` |
+| `/analytics` | `NewAnalyticsPage` | mock | partial | Needs aggregation queries |
+| `/settings` | `NewSettingsPage` (tabbed) | hard-coded defaults in form | partial | AI tab still uses `defaultValue=` inputs; no PATCH to `/api/ai-settings`; no `voicePhone` editor |
+| `/ui-kit` | `NewUIKitPage` | static | done | Component showcase only |
 
 ## 5. Backend status (per domain)
 
 ### Auth
-- **Schema**: Supabase `auth.users` (managed by Supabase, not Prisma) ↔ [`ClinicStaff.authUserId`](prisma/schema.prisma#L132).
-- **Reads**: [`getCurrentUser`/`getCurrentStaff`/`requireStaff`/`requireRole`](lib/auth.ts) for SC/SA; [`requireApiStaff`/`requireApiRole`](lib/auth.ts#L80) for Route Handlers.
-- **Writes**: [`login`](app/(auth)/actions.ts#L11), [`register`](app/(auth)/actions.ts#L30), [`signout`](app/(auth)/actions.ts#L112) (Server Actions).
-- **Validation**: [`lib/validations/auth.ts`](lib/validations/auth.ts) — `registerSchema` with email/password/clinic fields.
-- **Tenant scoping**: ✅ — proxy + `getCurrentStaff` provides the staff→clinic link.
-- **Status**: ✅ done.
-- **Gaps**: No email-verification gating UI (Supabase may require email confirmation; current `register` does `redirect("/dashboard")` even when `authData.user` exists without confirmed email). No password-reset flow. No "resend invitation" / "accept invitation" routes wired despite `StaffInvitation` model existing.
+- **Schema**: `ClinicStaff`, `Clinic`, `AiSettings` (created together in register transaction)
+- **Reads**: [lib/auth.ts](lib/auth.ts) — `getCurrentStaff`, `requireStaff`, `requireApiStaff`, `requireApiRole`
+- **Writes**: [app/(auth)/actions.ts](app/(auth)/actions.ts) — `login`, `register` (transactional), `signout`
+- **Validation**: [lib/validations/auth.ts](lib/validations/auth.ts) via `registerSchema`
+- **Tenant scoping**: enforced (every staff lookup filters `deactivatedAt: null`)
+- **Status**: done
+- **Gaps**: No email-confirmation UX; no password reset; no invitation-accept flow
 
 ### Clinic
-- **Schema**: [`Clinic`](prisma/schema.prisma#L103).
-- **Reads**: Read indirectly via `getCurrentStaff().clinic` — no settings-page query.
-- **Writes**: Created inside the `register` transaction ([app/(auth)/actions.ts#L77](app/(auth)/actions.ts#L77)); no update path.
-- **Validation**: Partial (only at registration via `registerSchema`).
-- **Tenant scoping**: ✅ (clinic is the tenant boundary).
-- **Status**: 🟡 partial.
-- **Gaps**: Settings → Profile/Clinic tab does not persist (`handleSave` is just a toast). No clinic-update Server Action.
+- **Schema**: `Clinic` with `voicePhone @unique`
+- **Reads**: indirectly via `getCurrentStaff().clinic` and `getClinicByVoicePhone` ([lib/voice/clinic-resolver.ts](lib/voice/clinic-resolver.ts))
+- **Writes**: only via register transaction; no PATCH endpoint
+- **Validation**: none on the runtime side (only `registerSchema`)
+- **Tenant scoping**: N/A (clinic is itself the tenant root)
+- **Status**: partial — missing PATCH endpoint for editing clinic profile (incl. `voicePhone`)
+- **Gaps**: No `/api/clinic` route; settings UI cannot edit clinic profile
 
 ### Staff / Team
-- **Schema**: [`ClinicStaff`](prisma/schema.prisma#L130), [`StaffInvitation`](prisma/schema.prisma#L390).
-- **Reads**: Only the current staff via `getCurrentStaff`. No team-list query.
-- **Writes**: Only `register` creates the initial Admin row.
-- **Validation**: Missing for invitation/team management.
-- **Tenant scoping**: N/A yet (no list endpoint).
-- **Status**: 🟡 partial — schema migrated, no UI/API.
-- **Gaps**: No "Team" tab in Settings. No invite-send Server Action. No invite-accept route. No deactivate/reactivate UI (despite `deactivatedAt` column and [`scripts/db-reactivate.mjs`](scripts/db-reactivate.mjs) existing as ops escape hatch).
+- **Schema**: `ClinicStaff`, `StaffInvitation`
+- **Reads/Writes**: no routes
+- **Validation**: missing
+- **Tenant scoping**: N/A (no endpoints yet)
+- **Status**: missing — Phase 6 deferred
+- **Gaps**: No invite flow, no roster endpoint, no role-edit UI
 
 ### Patients
-- **Schema**: [`Patient`](prisma/schema.prisma#L157).
-- **Reads**: ❌ missing.
-- **Writes**: ❌ missing (`AddPatientModal` is UI-only).
-- **Validation**: ❌ missing (no `lib/validations/patient.ts`).
-- **Tenant scoping**: N/A (no queries yet).
-- **Status**: ❌ missing (schema only).
-- **Gaps**: Everything except the schema. Need list/create/update/delete + zod schema.
+- **Schema**: `Patient`
+- **Reads**: [lib/patients/queries.ts](lib/patients/queries.ts) — `listPatients` (with `q`, pagination), `getPatient`
+- **Writes**: [lib/patients/mutations.ts](lib/patients/mutations.ts) — `createPatient`, `updatePatient`, `deletePatient` (hard)
+- **Routes**: [app/api/patients/route.ts](app/api/patients/route.ts) + [[id]/route.ts](app/api/patients/[id]/route.ts)
+- **Validation**: [lib/validations/patient.ts](lib/validations/patient.ts)
+- **Tenant scoping**: enforced via `clinicWhere(staff)` in every helper
+- **Status**: done (schema + API + FE)
+- **Gaps**: None functional. Soft-delete could be added later for audit trail.
+
+### Doctors
+- **Schema**: `Doctor` (+ `DoctorSchedule`, `DoctorTimeOff`)
+- **Reads**: [lib/doctors/queries.ts](lib/doctors/queries.ts) — `listDoctors` (filters out deactivated unless `includeDeactivated=true`)
+- **Writes**: [lib/doctors/mutations.ts](lib/doctors/mutations.ts) — `createDoctor`, `updateDoctor`, `deactivateDoctor` (soft), `reactivateDoctor`
+- **Routes**: [app/api/doctors/route.ts](app/api/doctors/route.ts) + [[id]/route.ts](app/api/doctors/[id]/route.ts)
+- **Validation**: [lib/validations/doctor.ts](lib/validations/doctor.ts)
+- **Tenant scoping**: enforced
+- **Status**: schema + API done; FE deferred
+- **Gaps**: No FE page (deferred — will surface as doctor-picker inside Appointments UI). No CRUD for `DoctorSchedule` / `DoctorTimeOff` yet.
 
 ### Appointments
-- **Schema**: [`Appointment`](prisma/schema.prisma#L224), plus `DoctorSchedule`/`DoctorTimeOff` to compute availability.
-- **Reads**: ❌ missing.
-- **Writes**: ❌ missing.
-- **Validation**: ❌ missing.
-- **Tenant scoping**: N/A.
-- **Status**: ❌ missing (schema only).
-- **Gaps**: All CRUD. Calendar view, slot-availability calculation, double-book handling (DB unique constraint will throw — needs friendly mapping to a 409 in the route). This is the table the AI receptionist will write to — it must land first.
+- **Schema**: `Appointment` with `@@unique([doctorId, scheduledAt])`
+- **Reads**: [lib/appointments/queries.ts](lib/appointments/queries.ts) — `listAppointments`, `getAppointment`, `computeAvailability` (walks `DoctorSchedule` minus `DoctorTimeOff` minus taken slots)
+- **Writes**: [lib/appointments/mutations.ts](lib/appointments/mutations.ts) — `createAppointment` (with `AppointmentFkError`), `updateAppointment`, `rescheduleAppointment`, `cancelAppointment` (soft)
+- **Routes**: [app/api/appointments/route.ts](app/api/appointments/route.ts), [[id]/route.ts](app/api/appointments/[id]/route.ts), [[id]/reschedule/route.ts](app/api/appointments/[id]/reschedule/route.ts), [app/api/availability/route.ts](app/api/availability/route.ts)
+- **Validation**: [lib/validations/appointment.ts](lib/validations/appointment.ts) — create / update / reschedule / availability
+- **Tenant scoping**: enforced; cross-clinic patient/doctor IDs raise `AppointmentFkError` -> 422 with field hint ([route.ts#L47](app/api/appointments/route.ts#L47))
+- **Status**: schema + API done; FE not wired
+- **Gaps**: `ImprovedAppointmentsPage` still uses `mockAppointments`; no UI for reschedule yet
 
 ### AI Settings
-- **Schema**: [`AiSettings`](prisma/schema.prisma#L322).
-- **Reads**: ❌ missing (Settings page uses hard-coded defaults).
-- **Writes**: Created at signup only ([app/(auth)/actions.ts#L98](app/(auth)/actions.ts#L98)); no update path.
-- **Validation**: ❌ missing.
-- **Tenant scoping**: N/A (1:1 with clinic).
-- **Status**: 🟡 partial (row exists, UI doesn't talk to it).
-- **Gaps**: Read on `/settings?tab=ai` load; update Server Action; zod schema.
+- **Schema**: `AiSettings` (1:1 with Clinic, `clinicId @unique`)
+- **Reads**: [lib/ai-settings/queries.ts](lib/ai-settings/queries.ts) — `getAiSettings`
+- **Writes**: [lib/ai-settings/mutations.ts](lib/ai-settings/mutations.ts) — `updateAiSettings` (upsert)
+- **Routes**: [app/api/ai-settings/route.ts](app/api/ai-settings/route.ts) — GET auto-bootstraps defaults; PATCH upserts
+- **Validation**: [lib/validations/ai-settings.ts](lib/validations/ai-settings.ts)
+- **Tenant scoping**: enforced (everything keyed off `staff.clinicId`)
+- **Status**: schema + API done; FE not wired (NewSettingsPage AI tab still uses `defaultValue` inputs)
+- **Gaps**: FE wire-up; expand schema for voice/persona/business-hours when AI vendor is selected
 
-### Analytics
-- **Schema**: Aggregates over `Appointment`, `CallLog`, `Notification`.
-- **Reads**: ❌ missing (all charts use literal arrays).
-- **Writes**: N/A.
-- **Validation**: N/A.
-- **Tenant scoping**: N/A.
-- **Status**: ❌ missing.
-- **Gaps**: Server Component to compute aggregates per clinic. Depends on real Appointment + CallLog data existing.
+### Calls (read side for dashboard)
+- **Schema**: `CallLog`
+- **Reads**: [lib/calls/queries.ts](lib/calls/queries.ts) — `listCalls`, `getCall`
+- **Writes**: [lib/calls/mutations.ts](lib/calls/mutations.ts) — `startCall` (upsert by `providerCallId`), `appendTranscriptTurn`, `endCall`
+- **Routes**: write path is voice webhooks only (see §7); no dashboard READ endpoint yet
+- **Validation**: per-webhook zod in the route files
+- **Tenant scoping**: writes use clinic resolved from `voicePhone`; reads spread `clinicWhere(staff)`
+- **Status**: schema + write API done; no `/api/calls` dashboard endpoint
+- **Gaps**: Dashboard `/api/calls` listing + detail endpoint; AI receptionist FE consumes nothing real
+
+### Voice webhooks (NEW)
+- **Schema**: `CallLog` + `WebhookEvent`
+- **Routes**: [app/api/voice/incoming-call/route.ts](app/api/voice/incoming-call/route.ts), [transcript-chunk/route.ts](app/api/voice/transcript-chunk/route.ts), [call-ended/route.ts](app/api/voice/call-ended/route.ts)
+- **Auth**: shared-secret via [lib/api/with-webhook-secret.ts](lib/api/with-webhook-secret.ts) — `timingSafeEqual`; fail-closed when env unset
+- **Idempotency**: [lib/voice/webhook-idempotency.ts](lib/voice/webhook-idempotency.ts) — claim, side-effect, mark processed; retries no-op
+- **Tenant resolution**: [lib/voice/clinic-resolver.ts](lib/voice/clinic-resolver.ts) -> `getClinicByVoicePhone(to)`
+- **Status**: done; verified with curl (wrong secret -> 401, unknown number -> 404, happy path -> 201, replay -> `duplicate: true`)
+
+### Notifications
+- **Schema**: `Notification`
+- **Status**: missing — no sender, no provider integration, no API
+
+### Cross-cutting API foundations
+- [lib/api/response.ts](lib/api/response.ts) — `ok`, `created`, `noContent`, `fail`, `failValidation`, `failNotFound`, `failConflict`
+- [lib/api/with-staff.ts](lib/api/with-staff.ts) — `withApiStaff`, `withApiRole`
+- [lib/api/prisma-errors.ts](lib/api/prisma-errors.ts) — `mapPrismaError` (P2002 / P2003 / P2025)
+- [lib/api/with-webhook-secret.ts](lib/api/with-webhook-secret.ts) — webhook guard
+- [lib/client/fetcher.ts](lib/client/fetcher.ts) — client wrapper + `ApiError`
 
 ## 6. Auth & multi-tenancy
 
-- **Login flow**: ✅ — [Server Action `login`](app/(auth)/actions.ts#L11) uses `signInWithPassword`, redirects to `/dashboard`; client form in [`NewLoginPage`](components/pages/NewLoginPage.tsx) with `useTransition` + sonner error toasts.
-- **Signup / clinic onboarding**: ✅ — [`register`](app/(auth)/actions.ts#L30) uses zod, then `prisma.$transaction` creates `Clinic` + `ClinicStaff` (`role: Admin`) + `AiSettings` atomically. Comments explicitly note timezone defaults to `Asia/Karachi`. There is a [`scripts/repro-tx.mjs`](scripts/repro-tx.mjs) confirming this provisioning flow is being actively hardened.
-- **Session reading (server-side)**: ✅ — [`getCurrentStaff`](lib/auth.ts#L38) uses `supabase.auth.getUser()` (JWT-verified, not just cookie-presence) and filters out soft-deleted staff.
-- **Edge proxy gate (`proxy.ts`)**: ✅ — [`proxy.ts`](proxy.ts) at repo root delegates to [`lib/supabase/proxy.ts`](lib/supabase/proxy.ts). Gates `/dashboard/*` for unauthenticated users (redirects to `/auth?redirectedFrom=...`) and bounces authenticated users away from `/auth`. Cookie sync between `request.cookies` and the response is correctly handled per Supabase SSR docs. The matcher excludes `api/*` so route handlers will manage their own auth (none exist yet).
-- **ClinicStaff → Clinic scoping helper (`lib/clinic-scope.ts`)**: ✅ — [`clinicWhere(staff)`](lib/clinic-scope.ts#L29) returns `{ clinicId: staff.clinicId }` to be spread into every Prisma `where`. The file has an excellent commented threat model and a `findUnique` vs `findFirst` warning. **Convention-only** — no Prisma extension enforces it. Has a `TODO` flagging the need to audit `app/api/**` against the rule once routes land.
-- **Sign-out**: ✅ — [`signout`](app/(auth)/actions.ts#L112) Server Action, invoked via `<form action={signout}>` in [NewSidebar.tsx#L317](components/layout/NewSidebar.tsx#L317).
-- **Role-based permissions**: 🟡 — `requireRole(allowedRoles)` exists in [lib/auth.ts#L59](lib/auth.ts#L59), but no caller uses it yet. UI does not branch on `staff.role`.
+- **Login flow**: done. `login()` server action in [actions.ts#L11](app/(auth)/actions.ts#L11), `signInWithPassword`, then `redirect('/dashboard')`.
+- **Signup / clinic onboarding**: done. Transactional in [actions.ts#L30](app/(auth)/actions.ts#L30): Supabase `signUp` then Prisma `$transaction` creates `Clinic` + `ClinicStaff(Admin)` + `AiSettings` row.
+- **Session reading (server-side)**: done. `getCurrentUser` / `getCurrentStaff` in [lib/auth.ts](lib/auth.ts); `requireStaff` redirects to `/auth`; `requireApiStaff` returns 401 Response.
+- **Edge proxy gate** ([proxy.ts](proxy.ts) -> [lib/supabase/proxy.ts](lib/supabase/proxy.ts)): done. `/dashboard/*` blocks unauthenticated; `/auth` redirects authenticated users to `/dashboard`. `/api/*` is explicitly excluded — route handlers self-gate.
+- **`ClinicStaff` -> `Clinic` scoping helper** ([lib/clinic-scope.ts](lib/clinic-scope.ts)): done — `clinicWhere(staff)` used in every list/get/update/delete helper across all domains.
+- **Sign-out**: done. `signout()` server action in [actions.ts#L112](app/(auth)/actions.ts#L112); used by sidebar form at [NewSidebar.tsx#L317](components/layout/NewSidebar.tsx#L317).
+- **Role-based permissions**: partial. `requireApiRole` / `withApiRole` exist but no route currently scopes by role. Every staff member of a clinic can use every endpoint.
 
 ## 7. AI-module readiness (CRITICAL)
 
-| Seam | What's needed | Status | Where it lives / should live |
+The voice seams the AI module will plug into are now mostly in place.
+
+| Seam | What's needed | Status | Where it lives / where it should live |
 |---|---|---|---|
-| Webhook endpoint(s) for voice provider | One or more route handlers under `app/api/voice/*` (or `app/api/calls/*`) to receive provider callbacks (call-started / transcript-chunk / call-ended) and persist them. | ❌ | No `app/api/` directory exists. |
-| Call / Transcript / CallEvent Prisma models | Persist every call and its turns. | 🟡 | `CallLog` exists with `transcript: Json` ([prisma/schema.prisma#L262](prisma/schema.prisma#L262)) but no per-turn `CallEvent` table; no inbound-event/idempotency table. |
-| Audio recording storage | Supabase Storage bucket + signed-URL helper. | ❌ | `CallLog.recordingUrl` column exists but no `lib/storage/*`; no bucket policy in repo. |
-| AI settings table (persona, voice, hours, scripts) | `AiSettings` model + UI that reads/writes it. | 🟡 | Model exists and is seeded by `register`. Settings → AI tab UI ([components/pages/NewSettingsPage.tsx#L225](components/pages/NewSettingsPage.tsx#L225)) is static — does not read or persist. |
-| Real-time UI updates (live call view) | SSE route or Supabase Realtime subscription on `call_log`. | ❌ | No `EventSource`/SSE/Realtime usage anywhere in `lib/`, `app/`, `components/`. |
-| Background job runner (post-call summary, reminders) | Queue/cron infra (e.g. `pg_cron`, `pgmq`, Inngest, Trigger.dev). | ❌ | Nothing present. Scripts under `scripts/*.mjs` are manual ops only. |
-| Env vars / secret management | `.env.example` documenting all keys. | 🟡 | [`.env.example`](.env.example) documents Supabase + Prisma vars; no voice-provider / AI-service / SMS / email keys yet (intentionally TBD). |
-| Outbound notifications (SMS/email) | Provider SDK + dispatcher reading from `Notification` table. | ❌ | `Notification` model exists; no provider client, no dispatcher, no SDK in `package.json`. |
-| Phone-number → Patient lookup helper | Function to resolve a caller `patientPhone` to a `Patient` (or create a stub). | ❌ | `Patient.phoneNumber` is indexed ([prisma/schema.prisma#L177](prisma/schema.prisma#L177)) for exactly this purpose, but no helper exists. |
-| Slot-availability query | Given `(doctorId, dateRange)`, compute bookable slots from `DoctorSchedule`/`DoctorTimeOff` minus existing `Appointment` rows. | ❌ | Schema ready, query not written. |
-| Audit / event log of AI actions | Track every AI-initiated booking/cancellation for compliance. | ❌ | No `AuditLog` model. |
+| Webhook endpoint(s) for voice provider | `/api/voice/incoming-call`, `/transcript-chunk`, `/call-ended` | done | [app/api/voice/*](app/api/voice) |
+| `Call` / `Transcript` persistence | `CallLog` row per call, transcript as JSON turns | done | [prisma/schema.prisma#L268](prisma/schema.prisma#L268), [lib/calls/mutations.ts](lib/calls/mutations.ts) |
+| Webhook auth | Shared-secret header, timing-safe, fail-closed | done | [lib/api/with-webhook-secret.ts](lib/api/with-webhook-secret.ts) |
+| Webhook idempotency | `WebhookEvent` row per `providerEventId`; retry-safe | done | [lib/voice/webhook-idempotency.ts](lib/voice/webhook-idempotency.ts) |
+| Inbound number -> clinic resolution | `Clinic.voicePhone @unique` lookup | done | [lib/voice/clinic-resolver.ts](lib/voice/clinic-resolver.ts) |
+| Caller phone -> patient lookup | `Patient.phoneNumber` index + list endpoint with `q` | done | [schema.prisma#L183](prisma/schema.prisma#L183), [lib/patients/queries.ts](lib/patients/queries.ts) |
+| Slot availability for booking | `GET /api/availability` with `DoctorSchedule` minus `DoctorTimeOff` minus taken slots | done | [app/api/availability/route.ts](app/api/availability/route.ts), [lib/appointments/queries.ts#L88](lib/appointments/queries.ts#L88) |
+| Double-booking prevention for AI writes | DB-level `@@unique([doctorId, scheduledAt])` -> 409 | done | [schema.prisma#L253](prisma/schema.prisma#L253) |
+| AI settings table (persona, greeting, behavior toggles) | `AiSettings` model + GET endpoint the AI runtime calls per call | done | [schema.prisma#L339](prisma/schema.prisma#L339), [app/api/ai-settings/route.ts](app/api/ai-settings/route.ts) |
+| Env / secret management | `.env.example` documents `VOICE_WEBHOOK_SECRET`; `.gitignore` allows `.env.example` through | done | [.env.example#L36](.env.example#L36), [.gitignore#L34](.gitignore#L34) |
+| Audio recording storage | Supabase Storage bucket + signed URLs | missing | (Phase 7 — deferred. `CallLog.recordingUrl` field exists but no helper.) |
+| Real-time UI updates (live call view) | Supabase Realtime channel or SSE for call/transcript inserts | missing | (Phase 9 — deferred.) |
+| Background job runner (post-call summarization, reminders) | Queue / cron | missing | (Deferred.) |
+| Outbound notifications (SMS / email confirmation) | Provider client + `Notification` writer | missing | `Notification` model exists; no sender |
+| Voice settings beyond the basics (voice id, business hours, scripts) | Extra fields on `AiSettings` once AI vendor is chosen | partial | Current schema has agent name, greeting, four behavior toggles only |
+| Clinic `voicePhone` editor | UI / API to set the inbound number per clinic | missing | No PATCH `/api/clinic`; Settings -> Profile tab does not surface `voicePhone` |
+| Dashboard read API for calls | `/api/calls` list + detail | missing | `lib/calls/queries.ts` exists but no HTTP layer |
 
 **Ordered prerequisites before the AI module can land cleanly:**
-
-1. **Build the appointment read/write API + slot-availability query.** The AI receptionist's headline use case is "book an appointment over the phone" — there is currently nowhere to write that booking. Must land Patient CRUD, Doctor CRUD (incl. `DoctorSchedule`/`DoctorTimeOff` editor), and Appointment CRUD with the DB `doctor_slot_unique` constraint mapped to a 409 response.
-2. **Wire the Settings → AI tab to `AiSettings`** so persona/greeting/auto-book toggles are real config the voice runtime can read on every call.
-3. **Add Supabase Storage helper + recordings bucket** (private bucket, signed-URL on demand) so `CallLog.recordingUrl` is meaningful.
-4. **Add `app/api/voice/*` route handlers** behind a shared-secret header check (since the matcher in [proxy.ts](proxy.ts#L13) deliberately excludes `/api/`). Persist into `CallLog` + create/update `Appointment` rows scoped by the clinic the inbound number maps to (need a `clinic.phone` → `clinicId` lookup).
-5. **Decide call-event modelling**: keep `transcript: Json` for the MVP or normalize into a `CallEvent` table; either way add an inbound-event/idempotency table so provider retries don't double-book.
-6. **Add a job runner** (Postgres-based or external) for post-call summary, reminders, and the dispatcher reading from `Notification`.
-7. **Add Supabase Realtime or SSE** to push live transcript chunks into `NewAIReceptionistPage` so the existing UI becomes truthful.
-8. **Tenant resolution for inbound calls**: a single voice number maps to one clinic. Either add `Clinic.voicePhone` (distinct from staff contact phone) with a unique constraint, or a `PhoneNumber` lookup table — currently no field is unique on `Clinic.phone`.
+1. Add a clinic-profile PATCH endpoint + Settings UI so admins can set `Clinic.voicePhone` (today it can only be set with raw SQL).
+2. Add `/api/calls` (list + detail) and wire the AI receptionist FE to it — needed to verify calls land correctly even before realtime is added.
+3. Add Supabase Realtime (or SSE) for `call_log` and `webhook_event` so the live-call view updates in real time.
+4. Add a Supabase Storage bucket + signed-URL helper for recordings (`CallLog.recordingUrl`).
+5. Implement the notification sender (SMS/email) on top of `Notification` so post-booking confirmations actually go out.
+6. Pick the AI vendor and extend `AiSettings` with voice id, business hours, escalation script, etc.
 
 ## 8. Cross-cutting
 
-- **Tests**: ❌ — no test runner installed, no `__tests__` / `tests` dirs, no `*.test.ts` files. The `.playwright-mcp/` cache dir exists from the playwright MCP server but no committed Playwright config.
-- **Linting / formatting**: 🟡 — `next lint` via [eslint.config.mjs](eslint.config.mjs) with `eslint-config-next` only. No Prettier config in repo. No formatting hook.
-- **CI**: ❌ — no `.github/` directory; no other CI config.
-- **Error handling & logging**: 🟡 — auth helpers throw `NotAuthorizedError`; `register` action `console.error`s on transaction failure. No structured logger (`pino`/`winston`) and no error monitoring (Sentry).
-- **Env management**: ✅ baseline — [`.env.example`](.env.example) is thorough for the current scope (Supabase URL/publishable/secret + Prisma `DATABASE_URL`/`DIRECT_URL` with pgbouncer hint). Will need expansion when the AI module lands.
-- **Rate limiting**: ❌ — none on the auth Server Actions; brute-force protection relies entirely on Supabase.
-- **Scripts (`scripts/*.mjs`)**: ops/repro scripts only — [`db-inspect.mjs`](scripts/db-inspect.mjs) (read-only clinic/staff inspection), [`db-reactivate.mjs`](scripts/db-reactivate.mjs) (un-soft-delete staff by email), [`repro-tx.mjs`](scripts/repro-tx.mjs) (reproduces the signup transaction in isolation — clearly used to debug provisioning), [`supabase-find-user.mjs`](scripts/supabase-find-user.mjs), [`supabase-probe.mjs`](scripts/supabase-probe.mjs), [`supabase-signout.mjs`](scripts/supabase-signout.mjs). Not product features.
-- **Tracked but uncommitted (substantial work-in-progress)**: deleted `app/(auth)/login/page.tsx` and added [`app/(auth)/auth/page.tsx`](app/(auth)/auth/page.tsx) (route rename `/login` → `/auth`), modified [`app/(dashboard)/layout.tsx`](app/(dashboard)/layout.tsx) and [`prisma/schema.prisma`](prisma/schema.prisma), added all of [`lib/auth.ts`](lib/auth.ts), [`lib/clinic-scope.ts`](lib/clinic-scope.ts), [`lib/supabase/`](lib/supabase/), [`lib/validations/`](lib/validations/), [`app/(auth)/actions.ts`](app/(auth)/actions.ts), [`app/(dashboard)/_components/DashboardShell.tsx`](app/(dashboard)/_components/DashboardShell.tsx), [`proxy.ts`](proxy.ts), the `add_team_management_foundation` migration, and all of [`scripts/`](scripts/). **All of this is real, working code that hasn't been committed yet.**
+- **Tests**: deferred — out of scope. No Vitest, no Playwright spec files committed; per user direction, manual verification only.
+- **Linting / formatting**: ESLint 9 + `eslint-config-next` configured ([eslint.config.mjs](eslint.config.mjs)); `npm run lint`.
+- **CI**: deferred — out of scope.
+- **Error handling**: centralized via `lib/api/response.ts` + `mapPrismaError`; `AppointmentFkError` for cross-tenant FK violations.
+- **Logging**: console-only (e.g. [actions.ts#L101](app/(auth)/actions.ts#L101)). No structured logger.
+- **Env management**: `.env.example` documents all keys incl. `VOICE_WEBHOOK_SECRET`; `.gitignore`'s `.env*` rule explicitly allows `.env.example`.
+- **Scripts** ([scripts/](scripts)): `db-inspect.mjs`, `db-reactivate.mjs`, `repro-tx.mjs`, `supabase-find-user.mjs`, `supabase-probe.mjs`, `supabase-signout.mjs` — ops only, not app code.
+- **Migrations**: 3 applied — `20260504095155_init`, `20260508061122_add_team_management_foundation`, `20260523120000_add_voice_phone_and_webhook_events`.
 
 ## 9. Known issues / risks
 
-- **Convention-only tenant scoping**: [`lib/clinic-scope.ts`](lib/clinic-scope.ts) is enforced by code review, not by types or a Prisma extension. The first list endpoint that forgets `clinicWhere(staff)` leaks data across clinics. The file's own TODO acknowledges this.
-- **Email-confirmation gap**: [`register`](app/(auth)/actions.ts#L30) creates the clinic and redirects to `/dashboard` whenever `authData.user` is non-null, even when Supabase requires email confirmation. If confirmation is enforced server-side, the user lands on `/dashboard`, `proxy.ts` doesn't have a session, and they get bounced back to `/auth` with no message.
-- **Deprecated Doctor columns still in schema**: `Doctor.availableSlots` and `Doctor.workingHours` (Json) are marked DEPRECATED ([prisma/schema.prisma#L194-L196](prisma/schema.prisma#L194)) but not yet dropped — risk of two sources of truth for availability the moment a developer reads one and writes the other.
-- **Improved vs New naming exception**: `/appointments` routes to `ImprovedAppointmentsPage` ([app/(dashboard)/appointments/page.tsx](app/(dashboard)/appointments/page.tsx#L3)), breaking the "always `New*`" convention documented in [CLAUDE.md](CLAUDE.md). `NewAppointmentsPage.tsx` exists but is unused.
-- **Mock-data drift**: [`data/mockData.ts`](data/mockData.ts) defines its own `CallRecording`/`Appointment`/`Patient` types that do not match the Prisma models (e.g. `CallRecording.transcript` is a typed array, but `CallLog.transcript` is `Json`). Migrating the UI to Prisma will require mapping or rewriting types.
-- **`AiSettings` row uniqueness on register**: `register` calls `tx.aiSettings.create({ data: { clinicId: clinic.id } })` inside the transaction. If a clinic somehow gets two register attempts mid-flight (race in Supabase Auth then Prisma), the unique constraint on `clinicId` will throw — current code returns a generic `"Account created but clinic setup failed"` and leaves the auth user orphaned.
-- **No `.env.example` entry for the AI / voice / notification stack**: every key needed to integrate the AI module is undocumented, making onboarding for that work cold-start.
-- **No rate limiting on `login`/`register`** Server Actions — relies entirely on Supabase Auth defaults.
-- **`register-form-empty.png`** at repo root is an untracked screenshot likely from manual QA — should move to a `docs/` folder or be removed.
+- The `Doctor.availableSlots` and `Doctor.workingHours` JSON columns are marked DEPRECATED ([schema.prisma#L200](prisma/schema.prisma#L200), [#L202](prisma/schema.prisma#L202)) but still in the schema. Risk of dual-source-of-truth bugs if anything writes to them.
+- `proxy.ts` deliberately excludes `/api/*` from session gating ([proxy.ts#L13](proxy.ts#L13)). All `/api/*` handlers MUST call `withApiStaff` / `withApiRole` / `withWebhookSecret`. A future contributor adding an unguarded route would expose tenant data. No CI guard yet.
+- `CallLog.transcript` is JSON-blob append (read-modify-write in [mutations.ts#L53](lib/calls/mutations.ts#L53)). Sequential-only safe; parallel chunk delivery from a provider would race. Acceptable for a single voice runtime per call.
+- Tenant scoping is convention + code review ([clinic-scope.ts#L20](lib/clinic-scope.ts#L20)) — no Prisma client extension enforcing it. Risk grows as the team scales.
+- No rate limiting on `/api/voice/*` — relies entirely on the shared secret.
+- Patient `phoneNumber` is not unique-per-clinic; the caller-to-patient lookup will need a deterministic tie-breaker (latest first?) when implemented.
+- No `voicePhone` editor anywhere — only DB writes can set the inbound number.
 
 ## 10. Recommended next steps (in priority order)
 
-1. **Commit the auth + onboarding work.** Massive amount of working code is unstaged (`lib/auth.ts`, `lib/clinic-scope.ts`, `lib/supabase/*`, `lib/validations/*`, `app/(auth)/actions.ts`, `proxy.ts`, the `add_team_management_foundation` migration, `DashboardShell`, scripts). Land it as one or two reviewable commits before continuing.
-2. **Patients CRUD** as the warm-up domain — simplest single-clinic-scoped resource. Build: `app/api/patients/route.ts` (GET list, POST create) + `app/api/patients/[id]/route.ts` (GET/PATCH/DELETE) + `lib/validations/patient.ts` + replace `mockPatients` in `NewPatientsPage`. Use [`clinicWhere(staff)`](lib/clinic-scope.ts#L29) in every query. Establishes the pattern for everything downstream.
-3. **Doctors + DoctorSchedule + DoctorTimeOff CRUD.** Required before appointments can be booked. Drop the deprecated `availableSlots`/`workingHours` JSON columns in a follow-up migration after the new tables are in use.
-4. **Appointments CRUD + slot-availability query.** Map the `doctor_slot_unique` constraint violation to HTTP 409 with a friendly error. Replace `mockAppointments` in `NewDashboardPage` and `ImprovedAppointmentsPage`.
-5. **Wire Settings → AI tab to `AiSettings`** (read + update Server Action). This is the contract the AI module reads on every inbound call.
-6. **Team management UI** (Settings → Team tab) backed by `StaffInvitation` + an invite-send Server Action + an invite-accept route under `app/(auth)/invite/[token]/`.
-7. **Storage helper + recordings bucket** in `lib/storage/`. Private bucket, signed URLs minted by a server-only helper.
-8. **`app/api/voice/*` webhook endpoints** with shared-secret header verification, idempotency by event ID, writing into `CallLog` + (optionally) creating `Appointment` rows. Add a `Clinic.voicePhone` unique field so we can resolve which clinic an inbound call belongs to.
-9. **Real-time channel** (Supabase Realtime on `call_log` is the path of least resistance; we already have `@supabase/supabase-js`). Replace `mockCalls` in `NewAIReceptionistPage` with a Realtime subscription.
-10. **Tests + CI.** At minimum: Vitest for `lib/clinic-scope.ts` and the registration transaction (the scoping rule and the auth flow are the two places a regression silently destroys production). Add a `.github/workflows/ci.yml` running `npm run lint && npx prisma validate && npm run build`.
-11. **Address the convention-only scoping risk** by introducing a Prisma client extension that injects `clinicId` into clinic-owned models automatically — once we have 2+ list endpoints in production it's no longer safe to rely on review.
-12. **Pick voice + AI vendors** (out of scope for this audit) and add the corresponding env keys to `.env.example`.
+1. **Wire the Appointments FE to the API**. The backend (CRUD, reschedule, availability, double-book protection) is done; `ImprovedAppointmentsPage` still imports `mockAppointments`. This is the highest-leverage UI conversion: it also forces the doctor-picker UI to exist, which the AI module will eventually mirror server-side.
+2. **Wire the Settings -> AI tab to `/api/ai-settings`**. Currently the form uses hard-coded `defaultValue` inputs — the AI module reads `/api/ai-settings` on every inbound call, so admins MUST be able to edit it. Bundle a clinic-profile PATCH endpoint + Settings -> Profile editor for `voicePhone` while you're there.
+3. **Add Supabase Realtime push for the AI receptionist UI**. With webhooks now writing `CallLog` + `WebhookEvent` rows on every call, the live-call screen can become real if it subscribes to inserts on `call_log` (filtered by `clinicId`) and re-renders. Also expose a `/api/calls` listing endpoint so the page has historical data to render alongside the live feed.
