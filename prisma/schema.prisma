@@ -106,6 +106,11 @@ model Clinic {
   address   String?
   phone     String?
   email     String?
+  // The inbound voice number assigned to this clinic. Distinct from `phone`
+  // (staff contact) — `voicePhone` is what a patient dials, and the AI
+  // receptionist runtime resolves a clinic from the inbound `to` number via
+  // this field (must be unique).
+  voicePhone String?  @unique @map("voice_phone")
   // IANA tz name. Source of truth for "9am means what" — drives all
   // appointment scheduling, schedule editor, and reminder dispatch logic.
   timezone  String   @default("Asia/Karachi") @map("timezone")
@@ -116,6 +121,7 @@ model Clinic {
   doctors      Doctor[]
   patients     Patient[]
   appointments Appointment[]
+  callLogs     CallLog[]
   aiSettings   AiSettings?
   invitations  StaffInvitation[]
 
@@ -262,9 +268,9 @@ model Appointment {
 model CallLog {
   id              String         @id @default(cuid())
   patientPhone    String         @map("patient_phone")
-  durationSec     Int            @map("duration_sec")
+  durationSec     Int            @default(0) @map("duration_sec")
   detectedIntent  CallType?      @map("detected_intent")
-  outcome         CallOutcome
+  outcome         CallOutcome    @default(Failed)
   transcript      Json?          // [{role, text, timestamp}, ...]
   sentiment       CallSentiment?
   qualityRating   Int?           @map("quality_rating") // 1-5
@@ -272,6 +278,12 @@ model CallLog {
   startedAt       DateTime       @map("started_at")
   endedAt         DateTime?      @map("ended_at")
   createdAt       DateTime       @default(now()) @map("created_at")
+  updatedAt       DateTime       @updatedAt @map("updated_at")
+
+  // Required tenant key. Resolved by the inbound-call webhook from the
+  // `to` number (Clinic.voicePhone @unique).
+  clinicId String @map("clinic_id")
+  clinic   Clinic @relation(fields: [clinicId], references: [id], onDelete: Cascade)
 
   patientId String?  @map("patient_id")
   patient   Patient? @relation(fields: [patientId], references: [id], onDelete: SetNull)
@@ -279,6 +291,11 @@ model CallLog {
   appointmentId String?      @map("appointment_id")
   appointment   Appointment? @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
 
+  // The voice provider's call id. Lets the runtime correlate webhook events
+  // without us inventing our own id, and gives an idempotency anchor.
+  providerCallId String? @unique @map("provider_call_id")
+
+  @@index([clinicId])
   @@index([patientId])
   @@index([appointmentId])
   @@index([patientPhone])
@@ -406,4 +423,27 @@ model StaffInvitation {
   @@unique([clinicId, email])
   @@index([token])
   @@map("staff_invitation")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WEBHOOK EVENT — idempotency log for inbound webhooks (voice provider et al).
+// Providers RETRY on flaky responses; we look up by `providerEventId` and
+// short-circuit if `processedAt` is already set. `payload` captures the raw
+// body for replay / debugging. `error` captures the failure message so the
+// next retry knows whether to try again.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model WebhookEvent {
+  id              String   @id @default(cuid())
+  provider        String                                            // "voice", "sms", etc.
+  providerEventId String   @unique @map("provider_event_id")
+  eventType       String   @map("event_type")                       // "call.started", "call.ended", ...
+  payload         Json
+  receivedAt      DateTime @default(now()) @map("received_at")
+  processedAt     DateTime? @map("processed_at")
+  error           String?
+
+  @@index([provider, eventType])
+  @@index([receivedAt])
+  @@map("webhook_event")
 }
