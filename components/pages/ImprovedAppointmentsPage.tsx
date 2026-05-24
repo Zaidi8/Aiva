@@ -1,70 +1,149 @@
-import { useState } from 'react';
-import { Search, Calendar as CalendarIcon, Clock, User, Filter, Eye, Edit2, CheckCircle, X, Plus } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
+'use client';
+
+// Appointments page — calendar + list + filters + New Appointment modal.
+//
+// Reads the first page of appointments from the server-component shell
+// (app/(dashboard)/appointments/page.tsx) and lets the user search/filter on
+// the client. Mutations (creating a new appointment via NewAppointmentModal)
+// trigger router.refresh() which re-invokes the server component.
+//
+// The shape passed in is the JSON-safe form of AppointmentWithRelations —
+// scheduledAt is an ISO string here, not a Date, so we re-parse in renderers.
+
+import { useMemo, useState, useTransition } from 'react';
+import { useRouter } from 'next/navigation';
+import {
+  Search,
+  Calendar as CalendarIcon,
+  Clock,
+  User,
+  Plus,
+} from 'lucide-react';
+import { Card, CardContent } from '../ui/card';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Badge } from '../ui/badge';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '../ui/select';
 import { Calendar } from '../ui/calendar';
 import { TopBar } from '../ui/TopBar';
-import { DevControls } from '../ui/DevControls';
 import { PaginationBar } from '../ui/PaginationBar';
-import DateRangePicker from '../ui/date-range-picker';
-import { AppointmentDetailsModal } from '../ui/AppointmentDetailsModal';
 import { NewAppointmentModal } from '../ui/NewAppointmentModal';
 import { motion } from 'motion/react';
-import { mockAppointments } from '../../data/mockData';
+import type { AppointmentStatus, AppointmentType } from '@prisma/client';
+
+interface AppointmentRow {
+  id: string;
+  scheduledAt: string; // ISO
+  durationMin: number;
+  type: AppointmentType;
+  status: AppointmentStatus;
+  notes: string | null;
+  patient: { id: string; fullName: string; phoneNumber: string };
+  doctor: { id: string; name: string; specialization: string };
+}
 
 interface ImprovedAppointmentsPageProps {
+  initialAppointments: AppointmentRow[];
+  initialTotals: { total: number; confirmed: number; pending: number };
   onNavigate?: (page: string) => void;
 }
 
-interface DateRange {
-  start: string | null;
-  end: string | null;
+function formatTime(iso: string): string {
+  const d = new Date(iso);
+  return d.toLocaleTimeString('en-US', {
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  });
 }
 
-export function ImprovedAppointmentsPage({ onNavigate }: ImprovedAppointmentsPageProps) {
-  const [selectedDate, setSelectedDate] = useState<Date | undefined>(new Date());
-  const [dateRange, setDateRange] = useState<DateRange>({ start: null, end: null });
+function isSameLocalDay(isoA: string, dateB: Date): boolean {
+  const a = new Date(isoA);
+  return (
+    a.getFullYear() === dateB.getFullYear() &&
+    a.getMonth() === dateB.getMonth() &&
+    a.getDate() === dateB.getDate()
+  );
+}
+
+function statusBadgeClass(status: AppointmentStatus): string {
+  switch (status) {
+    case 'Confirmed':
+      return 'bg-[#27AE60]/10 text-[#27AE60]';
+    case 'Pending':
+      return 'bg-[#F2994A]/10 text-[#F2994A]';
+    case 'Completed':
+      return 'bg-[#2F80ED]/10 text-[#2F80ED]';
+    case 'Cancelled':
+    default:
+      return 'bg-gray-200 text-gray-600';
+  }
+}
+
+export function ImprovedAppointmentsPage({
+  initialAppointments,
+  initialTotals,
+}: ImprovedAppointmentsPageProps) {
+  const router = useRouter();
+  const [, startTransition] = useTransition();
+  const [selectedDate, setSelectedDate] = useState<Date | undefined>(
+    () => new Date(),
+  );
   const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all');
-  const [showEmptyState, setShowEmptyState] = useState(false);
-  const [isNewAppointmentModalOpen, setIsNewAppointmentModalOpen] = useState(false);
-  const [selectedAppointment, setSelectedAppointment] = useState<any>(null);
+  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [isNewAppointmentModalOpen, setIsNewAppointmentModalOpen] =
+    useState(false);
   const [currentPage, setCurrentPage] = useState(1);
-  const [showLargeDataset, setShowLargeDataset] = useState(false);
   const [itemsPerPage, setItemsPerPage] = useState(10);
 
-  // Generate large dataset if enabled
-  const largeDataset = showLargeDataset
-    ? Array.from({ length: 50 }, (_, i) => ({
-        ...mockAppointments[i % mockAppointments.length],
-        id: `${i + 1}`,
-        patient: `${mockAppointments[i % mockAppointments.length].patient}`,
-        patientPhone: mockAppointments[i % mockAppointments.length].patientPhone,
-        notes: `Appointment notes for patient ${i + 1}`,
-        date: '2024-01-20',
-      }))
-    : mockAppointments.map(apt => ({ ...apt, date: '2024-01-20', notes: 'Follow-up appointment' }));
+  const refresh = () => {
+    startTransition(() => router.refresh());
+  };
 
-  const filteredAppointments = (showEmptyState ? [] : largeDataset).filter((apt) => {
-    const matchesSearch =
-      apt.patient.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      apt.doctor.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesStatus = statusFilter === 'all' || apt.status === statusFilter;
-    return matchesSearch && matchesStatus;
-  });
+  // Filter pipeline.
+  const filteredAppointments = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    return initialAppointments.filter((apt) => {
+      const matchesSearch =
+        !q ||
+        apt.patient.fullName.toLowerCase().includes(q) ||
+        apt.doctor.name.toLowerCase().includes(q) ||
+        apt.patient.phoneNumber.toLowerCase().includes(q);
+      const matchesStatus =
+        statusFilter === 'all' || apt.status === statusFilter;
+      return matchesSearch && matchesStatus;
+    });
+  }, [initialAppointments, searchQuery, statusFilter]);
 
-  const totalPages = Math.ceil(filteredAppointments.length / itemsPerPage);
+  // Date-scoped subset for the calendar summary (independent of filters).
+  const dateScoped = useMemo(() => {
+    if (!selectedDate) return [];
+    return initialAppointments.filter((a) =>
+      isSameLocalDay(a.scheduledAt, selectedDate),
+    );
+  }, [initialAppointments, selectedDate]);
+
+  const dateScopedConfirmed = dateScoped.filter(
+    (a) => a.status === 'Confirmed',
+  ).length;
+  const dateScopedPending = dateScoped.filter(
+    (a) => a.status === 'Pending',
+  ).length;
+
+  const totalPages = Math.max(
+    1,
+    Math.ceil(filteredAppointments.length / itemsPerPage),
+  );
   const paginatedAppointments = filteredAppointments.slice(
     (currentPage - 1) * itemsPerPage,
-    currentPage * itemsPerPage
+    currentPage * itemsPerPage,
   );
-
-  const todayAppointments = filteredAppointments.length;
-  const confirmedAppointments = filteredAppointments.filter((a) => a.status === 'confirmed').length;
-  const pendingAppointments = filteredAppointments.filter((a) => a.status === 'pending').length;
 
   return (
     <div className="min-h-screen bg-[#F7F9FB]">
@@ -82,7 +161,7 @@ export function ImprovedAppointmentsPage({ onNavigate }: ImprovedAppointmentsPag
       />
 
       <div className="p-6 max-w-7xl mx-auto space-y-6">
-        {/* Horizontal Calendar Card */}
+        {/* Calendar + tiles */}
         <motion.div
           initial={{ y: -20, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
@@ -90,7 +169,6 @@ export function ImprovedAppointmentsPage({ onNavigate }: ImprovedAppointmentsPag
           <Card className="hover:shadow-lg transition-shadow">
             <CardContent className="p-6">
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                {/* Calendar */}
                 <div>
                   <h3 className="text-lg font-semibold text-[#333333] mb-4 flex items-center gap-2">
                     <CalendarIcon className="w-5 h-5 text-[#2F80ED]" />
@@ -102,56 +180,79 @@ export function ImprovedAppointmentsPage({ onNavigate }: ImprovedAppointmentsPag
                     onSelect={setSelectedDate}
                     className="rounded-md border-0 w-full"
                     classNames={{
-                      months: "w-full",
-                      month: "w-full",
-                      caption: "flex justify-center pt-1 relative items-center",
-                      caption_label: "text-sm font-medium",
-                      nav: "space-x-1 flex items-center",
-                      nav_button: "h-7 w-7 bg-transparent p-0 opacity-50 hover:opacity-100",
-                      table: "w-full border-collapse mt-4",
-                      head_row: "flex w-full",
-                      head_cell: "text-gray-500 rounded-md w-full font-normal text-[10px]",
-                      row: "flex w-full mt-2",
-                      cell: "text-center text-sm p-0 relative w-full h-9",
-                      day: "h-9 w-full p-0 font-normal hover:bg-[#2F80ED]/10 rounded-full transition-colors text-sm",
-                      day_selected: "bg-gradient-to-r from-[#2F80ED] to-[#56CCF2] text-white hover:bg-gradient-to-r hover:from-[#2F80ED] hover:to-[#56CCF2] hover:text-white rounded-full",
-                      day_today: "bg-gray-100 text-gray-900 rounded-full",
-                      day_outside: "text-gray-400 opacity-50",
+                      months: 'w-full',
+                      month: 'w-full',
+                      caption: 'flex justify-center pt-1 relative items-center',
+                      caption_label: 'text-sm font-medium',
+                      nav: 'space-x-1 flex items-center',
+                      nav_button:
+                        'h-7 w-7 bg-transparent p-0 opacity-50 hover:opacity-100',
+                      table: 'w-full border-collapse mt-4',
+                      head_row: 'flex w-full',
+                      head_cell:
+                        'text-gray-500 rounded-md w-full font-normal text-[10px]',
+                      row: 'flex w-full mt-2',
+                      cell: 'text-center text-sm p-0 relative w-full h-9',
+                      day: 'h-9 w-full p-0 font-normal hover:bg-[#2F80ED]/10 rounded-full transition-colors text-sm',
+                      day_selected:
+                        'bg-gradient-to-r from-[#2F80ED] to-[#56CCF2] text-white hover:bg-gradient-to-r hover:from-[#2F80ED] hover:to-[#56CCF2] hover:text-white rounded-full',
+                      day_today: 'bg-gray-100 text-gray-900 rounded-full',
+                      day_outside: 'text-gray-400 opacity-50',
                     }}
                   />
                 </div>
 
-                {/* Summary for Selected Date */}
                 <div>
                   <h3 className="text-lg font-semibold text-[#333333] mb-4">
                     Summary
                   </h3>
                   <p className="text-sm text-gray-600 mb-4">
-                    {selectedDate?.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
+                    {selectedDate?.toLocaleDateString('en-US', {
+                      month: 'long',
+                      day: 'numeric',
+                      year: 'numeric',
+                    })}
                   </p>
                   <div className="space-y-3">
                     <div className="flex items-center justify-between p-4 bg-[#2F80ED]/10 rounded-lg">
                       <div className="flex items-center gap-2">
                         <CalendarIcon className="w-5 h-5 text-[#2F80ED]" />
-                        <span className="text-sm text-gray-700 font-medium">Total Appointments</span>
+                        <span className="text-sm text-gray-700 font-medium">
+                          Total Appointments (selected day)
+                        </span>
                       </div>
-                      <span className="text-2xl font-semibold text-[#333333]">{todayAppointments}</span>
+                      <span className="text-2xl font-semibold text-[#333333]">
+                        {dateScoped.length}
+                      </span>
                     </div>
                     <div className="flex items-center justify-between p-4 bg-[#27AE60]/10 rounded-lg">
                       <div className="flex items-center gap-2">
                         <Clock className="w-5 h-5 text-[#27AE60]" />
-                        <span className="text-sm text-gray-700 font-medium">Confirmed</span>
+                        <span className="text-sm text-gray-700 font-medium">
+                          Confirmed
+                        </span>
                       </div>
-                      <span className="text-2xl font-semibold text-[#333333]">{confirmedAppointments}</span>
+                      <span className="text-2xl font-semibold text-[#333333]">
+                        {dateScopedConfirmed}
+                      </span>
                     </div>
                     <div className="flex items-center justify-between p-4 bg-[#F2994A]/10 rounded-lg">
                       <div className="flex items-center gap-2">
                         <Clock className="w-5 h-5 text-[#F2994A]" />
-                        <span className="text-sm text-gray-700 font-medium">Pending</span>
+                        <span className="text-sm text-gray-700 font-medium">
+                          Pending
+                        </span>
                       </div>
-                      <span className="text-2xl font-semibold text-[#333333]">{pendingAppointments}</span>
+                      <span className="text-2xl font-semibold text-[#333333]">
+                        {dateScopedPending}
+                      </span>
                     </div>
                   </div>
+                  <p className="text-xs text-gray-400 mt-4">
+                    Showing {initialTotals.total} appointments overall ·{' '}
+                    {initialTotals.confirmed} confirmed ·{' '}
+                    {initialTotals.pending} pending.
+                  </p>
                 </div>
               </div>
             </CardContent>
@@ -173,31 +274,34 @@ export function ImprovedAppointmentsPage({ onNavigate }: ImprovedAppointmentsPag
               className="pl-10 h-12"
             />
           </div>
-          <DateRangePicker value={dateRange} onChange={setDateRange} />
           <Select value={statusFilter} onValueChange={setStatusFilter}>
             <SelectTrigger className="w-full sm:w-48 h-12">
               <SelectValue placeholder="Filter by status" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Status</SelectItem>
-              <SelectItem value="confirmed">Confirmed</SelectItem>
-              <SelectItem value="pending">Pending</SelectItem>
-              <SelectItem value="completed">Completed</SelectItem>
-              <SelectItem value="cancelled">Cancelled</SelectItem>
+              <SelectItem value="Confirmed">Confirmed</SelectItem>
+              <SelectItem value="Pending">Pending</SelectItem>
+              <SelectItem value="Completed">Completed</SelectItem>
+              <SelectItem value="Cancelled">Cancelled</SelectItem>
             </SelectContent>
           </Select>
         </motion.div>
 
-        {/* Appointments List */}
+        {/* Appointments list */}
         {paginatedAppointments.length === 0 ? (
           <Card className="border-2 border-dashed border-gray-300">
             <CardContent className="p-12 text-center">
               <CalendarIcon className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-              <h3 className="text-xl text-gray-600 mb-2">No Appointments Found</h3>
+              <h3 className="text-xl text-gray-600 mb-2">
+                {initialAppointments.length === 0
+                  ? 'No appointments yet'
+                  : 'No appointments match'}
+              </h3>
               <p className="text-gray-500 mb-6">
-                {showEmptyState
-                  ? 'Start by adding your first appointment.'
-                  : 'Try adjusting your search or filters.'}
+                {initialAppointments.length === 0
+                  ? 'Schedule your first appointment to get started.'
+                  : 'Try adjusting your search or status filter.'}
               </p>
               <Button
                 className="bg-[#2F80ED] hover:bg-[#2F80ED]/90"
@@ -223,25 +327,39 @@ export function ImprovedAppointmentsPage({ onNavigate }: ImprovedAppointmentsPag
                     <div className="flex items-center justify-between flex-wrap gap-4">
                       <div className="flex items-center gap-4">
                         <div className="w-14 h-14 bg-gradient-to-br from-[#2F80ED] to-[#56CCF2] rounded-full flex items-center justify-center text-white text-lg shadow-md">
-                          {appointment.patient.split(' ').map((n) => n[0]).join('')}
+                          {appointment.patient.fullName
+                            .split(' ')
+                            .map((n) => n[0])
+                            .join('')
+                            .slice(0, 2)
+                            .toUpperCase()}
                         </div>
                         <div>
                           <h3 className="text-lg text-[#333333] font-medium mb-1">
-                            {appointment.patient}
+                            {appointment.patient.fullName}
                           </h3>
-                          <div className="flex items-center gap-4 text-sm text-gray-600">
+                          <div className="flex items-center gap-4 text-sm text-gray-600 flex-wrap">
                             <span className="flex items-center gap-1">
                               <User className="w-4 h-4" />
-                              {appointment.doctor}
+                              {appointment.doctor.name}
                             </span>
                             <span className="flex items-center gap-1">
                               <Clock className="w-4 h-4" />
-                              {appointment.time}
+                              {formatTime(appointment.scheduledAt)}
+                            </span>
+                            <span className="text-gray-400">
+                              {new Date(
+                                appointment.scheduledAt,
+                              ).toLocaleDateString('en-US', {
+                                month: 'short',
+                                day: 'numeric',
+                                year: 'numeric',
+                              })}
                             </span>
                           </div>
                         </div>
                       </div>
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-3 flex-wrap">
                         <Badge
                           variant="outline"
                           className="px-3 py-1 text-xs bg-gray-50"
@@ -249,27 +367,10 @@ export function ImprovedAppointmentsPage({ onNavigate }: ImprovedAppointmentsPag
                           {appointment.type}
                         </Badge>
                         <Badge
-                          className={`px-3 py-1 text-xs ${
-                            appointment.status === 'confirmed'
-                              ? 'bg-[#27AE60]/10 text-[#27AE60]'
-                              : appointment.status === 'pending'
-                              ? 'bg-[#F2994A]/10 text-[#F2994A]'
-                              : appointment.status === 'completed'
-                              ? 'bg-[#2F80ED]/10 text-[#2F80ED]'
-                              : 'bg-gray-200 text-gray-600'
-                          }`}
+                          className={`px-3 py-1 text-xs ${statusBadgeClass(appointment.status)}`}
                         >
                           {appointment.status}
                         </Badge>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="hidden sm:flex"
-                          onClick={() => setSelectedAppointment(appointment)}
-                        >
-                          <Eye className="w-4 h-4 mr-2" />
-                          View Details
-                        </Button>
                       </div>
                     </div>
                   </CardContent>
@@ -297,22 +398,10 @@ export function ImprovedAppointmentsPage({ onNavigate }: ImprovedAppointmentsPag
         </div>
       )}
 
-      <DevControls
-        onEmptyStateToggle={() => setShowEmptyState(!showEmptyState)}
-        onLargeDataToggle={() => setShowLargeDataset(!showLargeDataset)}
-        currentPage={currentPage}
-        totalPages={totalPages}
-      />
-
       <NewAppointmentModal
         isOpen={isNewAppointmentModalOpen}
         onClose={() => setIsNewAppointmentModalOpen(false)}
-      />
-
-      <AppointmentDetailsModal
-        isOpen={!!selectedAppointment}
-        onClose={() => setSelectedAppointment(null)}
-        appointment={selectedAppointment}
+        onCreated={refresh}
       />
     </div>
   );

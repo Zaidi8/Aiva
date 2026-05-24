@@ -1,0 +1,4 @@
+livekit-agents[silero,turn-detector]==1.5.12
+livekit-plugins-groq==1.5.12
+livekit-plugins-elevenlabs==1.5.12
+python-dotenv>=1.0,<2.0

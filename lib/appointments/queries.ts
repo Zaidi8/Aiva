@@ -1,7 +1,11 @@
 // Aiva — tenant-scoped appointment reads + slot-availability computation.
 
 import "server-only";
-import type { Appointment, AppointmentStatus, ClinicStaff } from "@prisma/client";
+import type {
+  Appointment,
+  AppointmentStatus,
+  ClinicStaff,
+} from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { clinicWhere } from "@/lib/clinic-scope";
 
@@ -15,10 +19,18 @@ export interface ListAppointmentsOptions {
   skip?: number;
 }
 
+// Shape mirrors the `include` block below — callers that consume the FK
+// names get a typed `patient` and `doctor` sub-object without having to
+// cast or reach into Prisma.GetPayload helpers.
+export type AppointmentWithRelations = Appointment & {
+  patient: { id: string; fullName: string; phoneNumber: string };
+  doctor: { id: string; name: string; specialization: string };
+};
+
 export async function listAppointments(
   staff: Pick<ClinicStaff, "clinicId">,
   opts: ListAppointmentsOptions = {},
-): Promise<{ items: Appointment[]; total: number }> {
+): Promise<{ items: AppointmentWithRelations[]; total: number }> {
   const where = {
     ...clinicWhere(staff),
     ...(opts.from || opts.to
@@ -50,7 +62,7 @@ export async function listAppointments(
     }),
     prisma.appointment.count({ where }),
   ]);
-  return { items, total };
+  return { items: items as AppointmentWithRelations[], total };
 }
 
 export async function getAppointment(
