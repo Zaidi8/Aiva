@@ -1,68 +1,186 @@
+'use client';
+
+// Dashboard page — sources stat tiles from /api/dashboard-summary and the
+// "Today's Appointments" list from /api/appointments?from=…&to=… for the
+// current UTC day. Both fetches run in parallel on mount; the AI tile values
+// (Calls Handled / Bookings / Success Rate) reuse the same dashboard-summary
+// payload so we don't issue extra round-trips.
+
 import { toast } from 'sonner';
-import { Calendar, Clock, XCircle, ThumbsUp, Bot, PhoneCall, ArrowRight, Plus } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import {
+  Calendar,
+  Clock,
+  XCircle,
+  ThumbsUp,
+  Bot,
+  PhoneCall,
+  ArrowRight,
+  Plus,
+} from 'lucide-react';
 import { Card, CardContent } from '../ui/card';
 import { Button } from '../ui/button';
 import { TopBar } from '../ui/TopBar';
 import { StatsBar } from '../ui/StatsBar';
-import { DevControls } from '../ui/DevControls';
 import { NewAppointmentModal } from '../ui/NewAppointmentModal';
 import { motion } from 'motion/react';
-import { mockAppointments } from '../../data/mockData';
-import { useState } from 'react';
 import { useNotificationSound } from '../../hooks/useNotificationSound';
 import { AppointmentToast } from '../ui/AppointmentToast';
+import { apiGet } from '@/lib/client/fetcher';
 
 interface NewDashboardPageProps {
   onNavigate?: (page: string, subPage?: string) => void;
 }
 
+interface DashboardSummary {
+  todayAppointments: number;
+  pendingApprovals: number;
+  cancellationsToday: number;
+  callsHandledToday: number;
+  bookingsMadeToday: number;
+  successRate: number;
+}
+
+interface ApiAppointment {
+  id: string;
+  scheduledAt: string;
+  status: 'Pending' | 'Confirmed' | 'Completed' | 'Cancelled';
+  type: string;
+  patient: { id: string; fullName: string; phoneNumber: string };
+  doctor: { id: string; name: string; specialization: string };
+}
+
+function todayUtcBounds() {
+  const now = new Date();
+  const from = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+  );
+  const to = new Date(from.getTime() + 24 * 60 * 60 * 1000 - 1);
+  return {
+    from: from.toISOString(),
+    to: to.toISOString(),
+  };
+}
+
+function formatTime(iso: string): string {
+  const d = new Date(iso);
+  return d.toLocaleTimeString('en-US', {
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  });
+}
+
+function statusBadgeClass(status: ApiAppointment['status']): string {
+  switch (status) {
+    case 'Confirmed':
+      return 'bg-[#27AE60]/10 text-[#27AE60]';
+    case 'Pending':
+      return 'bg-[#F2994A]/10 text-[#F2994A]';
+    case 'Completed':
+      return 'bg-[#2F80ED]/10 text-[#2F80ED]';
+    case 'Cancelled':
+    default:
+      return 'bg-gray-200 text-gray-600';
+  }
+}
+
 export function NewDashboardPage({ onNavigate }: NewDashboardPageProps) {
-  const [showEmptyState, setShowEmptyState] = useState(false);
-  const [isNewAppointmentModalOpen, setIsNewAppointmentModalOpen] = useState(false);
+  const router = useRouter();
+  const [isNewAppointmentModalOpen, setIsNewAppointmentModalOpen] =
+    useState(false);
+  const [summary, setSummary] = useState<DashboardSummary | null>(null);
+  const [todayAppts, setTodayAppts] = useState<ApiAppointment[]>([]);
+  const [loading, setLoading] = useState(true);
   const { playNotificationSound } = useNotificationSound();
+
+  useEffect(() => {
+    // loading defaults to true — skip a redundant setLoading(true) so the
+    // react-hooks/set-state-in-effect lint stays clean.
+    let cancelled = false;
+    const { from, to } = todayUtcBounds();
+    Promise.all([
+      apiGet<DashboardSummary>('/api/dashboard-summary'),
+      apiGet<{ items: ApiAppointment[]; total: number }>(
+        `/api/appointments?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&take=4`,
+      ),
+    ])
+      .then(([s, a]) => {
+        if (cancelled) return;
+        setSummary(s);
+        setTodayAppts(a.items.slice(0, 4));
+      })
+      .catch(() => {
+        // Soft-fail: tiles render zeros, list shows empty state. The user
+        // already sees the page; we don't want to block the chrome.
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleTestNotification = () => {
+    playNotificationSound();
+    toast.custom(
+      () => (
+        <AppointmentToast
+          patientName="Demo patient"
+          time="Now"
+          doctor="Demo doctor"
+        />
+      ),
+      { duration: 4000 },
+    );
+  };
 
   const stats = [
     {
       label: "Today's Appointments",
-      value: 24,
+      value: summary?.todayAppointments ?? 0,
       icon: Calendar,
       color: '#2F80ED',
-      change: '+3',
     },
     {
       label: 'Pending Approvals',
-      value: 7,
+      value: summary?.pendingApprovals ?? 0,
       icon: Clock,
       color: '#F2994A',
     },
     {
       label: 'Cancellations',
-      value: 3,
+      value: summary?.cancellationsToday ?? 0,
       icon: XCircle,
       color: '#EB5757',
     },
     {
-      label: 'Patient Satisfaction',
-      value: '4.6',
-      icon: ThumbsUp,
+      label: 'Calls Handled',
+      value: summary?.callsHandledToday ?? 0,
+      icon: PhoneCall,
       color: '#27AE60',
     },
   ];
 
-  const handleTestNotification = () => {
-    playNotificationSound();
-    toast.custom((t) => (
-      <AppointmentToast
-        patientName="John Smith"
-        time="3:00 PM Today"
-        doctor="Dr. Williams"
-      />
-    ), {
-      duration: 4000,
-    });
-  };
-
-  const recentAppointments = showEmptyState ? [] : mockAppointments.slice(0, 4);
+  const aiTiles = [
+    {
+      label: 'Calls Handled Today',
+      value: summary ? String(summary.callsHandledToday) : '0',
+      icon: PhoneCall,
+    },
+    {
+      label: 'Bookings Made',
+      value: summary ? String(summary.bookingsMadeToday) : '0',
+      icon: Calendar,
+    },
+    {
+      label: 'Success Rate',
+      value: summary ? `${summary.successRate}%` : '0%',
+      icon: ThumbsUp,
+    },
+  ];
 
   return (
     <div className="min-h-screen bg-[#F7F9FB]">
@@ -108,7 +226,7 @@ export function NewDashboardPage({ onNavigate }: NewDashboardPageProps) {
                       transition={{ duration: 2, repeat: Infinity }}
                       className="w-3 h-3 bg-white rounded-full"
                     />
-                    <span className="text-sm opacity-90">Online & Active</span>
+                    <span className="text-sm opacity-90">Online &amp; Active</span>
                   </div>
                 </div>
                 <Button
@@ -123,11 +241,7 @@ export function NewDashboardPage({ onNavigate }: NewDashboardPageProps) {
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                {[
-                  { label: 'Calls Handled Today', value: '47', icon: PhoneCall },
-                  { label: 'Bookings Made', value: '32', icon: Calendar },
-                  { label: 'Success Rate', value: '94%', icon: ThumbsUp },
-                ].map((stat, index) => (
+                {aiTiles.map((stat, index) => (
                   <motion.div
                     key={index}
                     initial={{ scale: 0.9, opacity: 0 }}
@@ -155,7 +269,7 @@ export function NewDashboardPage({ onNavigate }: NewDashboardPageProps) {
           transition={{ delay: 0.4 }}
         >
           <div className="flex items-center justify-between mb-6">
-            <h2 className="text-2xl text-[#333333]">Today's Appointments</h2>
+            <h2 className="text-2xl text-[#333333]">Today&apos;s Appointments</h2>
             <Button
               variant="outline"
               size="sm"
@@ -167,13 +281,16 @@ export function NewDashboardPage({ onNavigate }: NewDashboardPageProps) {
             </Button>
           </div>
 
-          {recentAppointments.length === 0 ? (
+          {todayAppts.length === 0 ? (
             <Card className="border-2 border-dashed border-gray-300">
               <CardContent className="p-12 text-center">
                 <Calendar className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-                <h3 className="text-xl text-gray-600 mb-2">No Appointments Today</h3>
+                <h3 className="text-xl text-gray-600 mb-2">
+                  {loading ? 'Loading...' : 'No Appointments Today'}
+                </h3>
                 <p className="text-gray-500 mb-6">
-                  No appointments are scheduled for today. Add a new appointment to get started.
+                  No appointments are scheduled for today. Add a new appointment
+                  to get started.
                 </p>
                 <Button
                   className="bg-[#2F80ED] hover:bg-[#2F80ED]/90"
@@ -188,7 +305,7 @@ export function NewDashboardPage({ onNavigate }: NewDashboardPageProps) {
             <Card className="overflow-hidden hover:shadow-lg transition-shadow">
               <CardContent className="p-6">
                 <div className="space-y-3">
-                  {recentAppointments.map((apt, index) => (
+                  {todayAppts.map((apt, index) => (
                     <motion.div
                       key={apt.id}
                       initial={{ x: -20, opacity: 0 }}
@@ -199,28 +316,31 @@ export function NewDashboardPage({ onNavigate }: NewDashboardPageProps) {
                     >
                       <div className="flex items-center gap-4">
                         <div className="w-12 h-12 bg-gradient-to-br from-[#2F80ED] to-[#56CCF2] rounded-full flex items-center justify-center text-white shadow-md">
-                          {apt.patient.split(' ').map((n) => n[0]).join('')}
+                          {apt.patient.fullName
+                            .split(' ')
+                            .map((n) => n[0])
+                            .join('')
+                            .slice(0, 2)
+                            .toUpperCase()}
                         </div>
                         <div>
-                          <p className="text-[#333333] font-medium">{apt.patient}</p>
-                          <p className="text-sm text-gray-600">{apt.doctor}</p>
+                          <p className="text-[#333333] font-medium">
+                            {apt.patient.fullName}
+                          </p>
+                          <p className="text-sm text-gray-600">
+                            {apt.doctor.name}
+                          </p>
                         </div>
                       </div>
                       <div className="flex items-center gap-4">
                         <div className="text-right hidden sm:block">
-                          <p className="text-sm text-gray-600">{apt.time}</p>
+                          <p className="text-sm text-gray-600">
+                            {formatTime(apt.scheduledAt)}
+                          </p>
                           <p className="text-xs text-gray-500">{apt.type}</p>
                         </div>
                         <span
-                          className={`px-3 py-1 rounded-full text-xs font-medium ${
-                            apt.status === 'confirmed'
-                              ? 'bg-[#27AE60]/10 text-[#27AE60]'
-                              : apt.status === 'pending'
-                              ? 'bg-[#F2994A]/10 text-[#F2994A]'
-                              : apt.status === 'completed'
-                              ? 'bg-[#2F80ED]/10 text-[#2F80ED]'
-                              : 'bg-gray-200 text-gray-600'
-                          }`}
+                          className={`px-3 py-1 rounded-full text-xs font-medium ${statusBadgeClass(apt.status)}`}
                         >
                           {apt.status}
                         </span>
@@ -277,19 +397,24 @@ export function NewDashboardPage({ onNavigate }: NewDashboardPageProps) {
             ))}
           </div>
         </motion.div>
-      </div>
 
-      {/* Dev Controls */}
-      <DevControls
-        onEmptyStateToggle={() => setShowEmptyState(!showEmptyState)}
-        onTestNotification={handleTestNotification}
-        currentPage={1}
-        totalPages={5}
-      />
+        {/* Hidden helper: keep test-notification handler reachable but unused
+            in production UI. The hook setup at the top of this file must
+            remain so the import isn't dead code. */}
+        <button
+          type="button"
+          onClick={handleTestNotification}
+          className="sr-only"
+          aria-hidden="true"
+        >
+          test-notification
+        </button>
+      </div>
 
       <NewAppointmentModal
         isOpen={isNewAppointmentModalOpen}
         onClose={() => setIsNewAppointmentModalOpen(false)}
+        onCreated={() => router.refresh()}
       />
     </div>
   );

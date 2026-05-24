@@ -1,11 +1,34 @@
+'use client';
+
+// Analytics page — pulls totals + chart series from /api/analytics.
+//
+// The "Appointment Type" filter is UI-only for now (the backend doesn't
+// segment by type yet). The "Time Range" filter maps to /api/analytics's
+// `range` query param: this-week | this-month | last-30d | this-year.
+// Changing it re-fetches the payload, and the charts re-bind reactively.
+//
+// We drop the previous static literal cards (1,284 patients / 18.7% growth)
+// and the Performance Metrics card whose values were entirely fabricated.
+
+import { useEffect, useState } from 'react';
 import { TrendingUp, Users, Calendar, Activity, Download } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../ui/card';
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+} from '../ui/card';
 import { Button } from '../ui/button';
 import { TopBar } from '../ui/TopBar';
-import { DevControls } from '../ui/DevControls';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '../ui/select';
 import { motion } from 'motion/react';
-import { useState } from 'react';
 import {
   LineChart,
   Line,
@@ -18,40 +41,119 @@ import {
   ResponsiveContainer,
   Legend,
 } from 'recharts';
+import { apiGet } from '@/lib/client/fetcher';
 
-const appointmentData = [
-  { month: 'Jan', appointments: 45, completed: 42 },
-  { month: 'Feb', appointments: 52, completed: 48 },
-  { month: 'Mar', appointments: 61, completed: 58 },
-  { month: 'Apr', appointments: 58, completed: 55 },
-  { month: 'May', appointments: 70, completed: 67 },
-  { month: 'Jun', appointments: 75, completed: 72 },
-];
+type AnalyticsRange = 'this-week' | 'this-month' | 'last-30d' | 'this-year';
 
-const weeklyAppointmentsData = [
-  { day: 'Mon', booked: 12, confirmed: 10, canceled: 2 },
-  { day: 'Tue', booked: 15, confirmed: 13, canceled: 2 },
-  { day: 'Wed', booked: 18, confirmed: 15, canceled: 3 },
-  { day: 'Thu', booked: 14, confirmed: 12, canceled: 2 },
-  { day: 'Fri', booked: 20, confirmed: 17, canceled: 3 },
-  { day: 'Sat', booked: 10, confirmed: 8, canceled: 2 },
-  { day: 'Sun', booked: 5, confirmed: 4, canceled: 1 },
-];
+interface AnalyticsPayload {
+  range: AnalyticsRange;
+  totals: {
+    totalPatients: number;
+    appointmentsInRange: number;
+    completedInRange: number;
+    growthRatePct: number;
+  };
+  monthly: Array<{ month: string; appointments: number; completed: number }>;
+  weekly: Array<{
+    day: string;
+    booked: number;
+    confirmed: number;
+    cancelled: number;
+  }>;
+}
 
 interface NewAnalyticsPageProps {
   onNavigate?: (page: string) => void;
 }
 
-export function NewAnalyticsPage({ onNavigate }: NewAnalyticsPageProps) {
-  const [timeRange, setTimeRange] = useState('month');
-  const [appointmentType, setAppointmentType] = useState('all');
+const RANGE_OPTIONS: { value: AnalyticsRange; label: string }[] = [
+  { value: 'this-week', label: 'This Week' },
+  { value: 'this-month', label: 'This Month' },
+  { value: 'last-30d', label: 'Last 30 Days' },
+  { value: 'this-year', label: 'This Year' },
+];
+
+function formatPct(n: number): string {
+  const sign = n >= 0 ? '+' : '';
+  return `${sign}${n.toFixed(1)}%`;
+}
+
+export function NewAnalyticsPage({
+  onNavigate: _onNavigate,
+}: NewAnalyticsPageProps) {
+  void _onNavigate;
+  const [range, setRange] = useState<AnalyticsRange>('this-month');
+  const [data, setData] = useState<AnalyticsPayload | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    // loading defaults to true on first mount, and on subsequent range
+    // changes we let the next .then() flip it. We don't pre-set loading here
+    // (which would trigger react-hooks/set-state-in-effect); the brief stale
+    // data while refetching is fine since the cards just show the old values.
+    let cancelled = false;
+    apiGet<AnalyticsPayload>(`/api/analytics?range=${range}`)
+      .then((res) => {
+        if (cancelled) return;
+        setData(res);
+        setError(null);
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        setError(e instanceof Error ? e.message : 'Failed to load analytics.');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [range]);
+
+  const totals = data?.totals ?? {
+    totalPatients: 0,
+    appointmentsInRange: 0,
+    completedInRange: 0,
+    growthRatePct: 0,
+  };
+
+  const metricCards = [
+    {
+      label: 'Total Patients',
+      value: totals.totalPatients,
+      icon: Users,
+      color: '#2F80ED',
+      hint: 'All-time',
+    },
+    {
+      label: 'Appointments (range)',
+      value: totals.appointmentsInRange,
+      icon: Calendar,
+      color: '#56CCF2',
+      hint: data ? RANGE_OPTIONS.find((r) => r.value === data.range)?.label : '',
+    },
+    {
+      label: 'Completed (range)',
+      value: totals.completedInRange,
+      icon: Activity,
+      color: '#27AE60',
+      hint: data ? RANGE_OPTIONS.find((r) => r.value === data.range)?.label : '',
+    },
+    {
+      label: 'Growth vs prev',
+      value: formatPct(totals.growthRatePct),
+      icon: TrendingUp,
+      color: totals.growthRatePct >= 0 ? '#27AE60' : '#EB5757',
+      hint: 'Appointments',
+    },
+  ];
 
   return (
     <div className="min-h-screen bg-[#F7F9FB]">
       <TopBar
         title="Analytics & Reports"
         description="Comprehensive insights into clinic performance"
-        notificationCount={0}
       />
 
       <div className="p-8 max-w-7xl mx-auto space-y-8">
@@ -62,74 +164,47 @@ export function NewAnalyticsPage({ onNavigate }: NewAnalyticsPageProps) {
           className="flex flex-col sm:flex-row gap-4 bg-white p-4 rounded-xl shadow-sm"
         >
           <div className="flex-1">
-            <label className="text-sm text-gray-600 mb-2 block">Time Range</label>
-            <Select value={timeRange} onValueChange={setTimeRange}>
+            <label className="text-sm text-gray-600 mb-2 block">
+              Time Range
+            </label>
+            <Select
+              value={range}
+              onValueChange={(v) => setRange(v as AnalyticsRange)}
+            >
               <SelectTrigger className="w-full">
                 <SelectValue placeholder="Select time range" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="week">This Week</SelectItem>
-                <SelectItem value="month">This Month</SelectItem>
-                <SelectItem value="quarter">This Quarter</SelectItem>
-                <SelectItem value="year">This Year</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="flex-1">
-            <label className="text-sm text-gray-600 mb-2 block">Appointment Type</label>
-            <Select value={appointmentType} onValueChange={setAppointmentType}>
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder="Select appointment type" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Types</SelectItem>
-                <SelectItem value="checkup">General Checkup</SelectItem>
-                <SelectItem value="consultation">Consultation</SelectItem>
-                <SelectItem value="followup">Follow-up</SelectItem>
-                <SelectItem value="emergency">Emergency</SelectItem>
+                {RANGE_OPTIONS.map((opt) => (
+                  <SelectItem key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
           <div className="flex items-end">
-            <Button variant="outline" className="w-full sm:w-auto">
+            <Button
+              variant="outline"
+              className="w-full sm:w-auto"
+              disabled
+              title="Export not implemented yet"
+            >
               <Download className="w-4 h-4 mr-2" />
               Export Report
             </Button>
           </div>
         </motion.div>
 
+        {error && (
+          <div className="rounded-md border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700">
+            {error}
+          </div>
+        )}
+
         {/* Key Metrics */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-          {[
-            {
-              label: 'Total Patients',
-              value: '1,284',
-              change: '+8.2%',
-              icon: Users,
-              color: '#2F80ED',
-            },
-            {
-              label: 'Appointments This Month',
-              value: '75',
-              change: '+15.3%',
-              icon: Calendar,
-              color: '#56CCF2',
-            },
-            {
-              label: 'Completed Appointments',
-              value: '72',
-              change: '+12.5%',
-              icon: Activity,
-              color: '#27AE60',
-            },
-            {
-              label: 'Growth Rate',
-              value: '18.7%',
-              change: '+3.1%',
-              icon: TrendingUp,
-              color: '#F2994A',
-            },
-          ].map((metric, index) => (
+          {metricCards.map((metric, index) => (
             <motion.div
               key={index}
               initial={{ scale: 0.9, opacity: 0 }}
@@ -144,12 +219,21 @@ export function NewAnalyticsPage({ onNavigate }: NewAnalyticsPageProps) {
                       className="w-12 h-12 rounded-xl flex items-center justify-center"
                       style={{ backgroundColor: `${metric.color}15` }}
                     >
-                      <metric.icon className="w-6 h-6" style={{ color: metric.color }} />
+                      <metric.icon
+                        className="w-6 h-6"
+                        style={{ color: metric.color }}
+                      />
                     </div>
-                    <span className="text-sm font-medium text-[#27AE60]">{metric.change}</span>
+                    {metric.hint && (
+                      <span className="text-xs text-gray-500">
+                        {metric.hint}
+                      </span>
+                    )}
                   </div>
                   <p className="text-sm text-gray-600 mb-1">{metric.label}</p>
-                  <p className="text-3xl text-[#333333]">{metric.value}</p>
+                  <p className="text-3xl text-[#333333]">
+                    {loading ? '…' : metric.value}
+                  </p>
                 </CardContent>
               </Card>
             </motion.div>
@@ -166,23 +250,17 @@ export function NewAnalyticsPage({ onNavigate }: NewAnalyticsPageProps) {
           >
             <Card className="hover:shadow-lg transition-shadow">
               <CardHeader>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <CardTitle>Monthly Appointment Trends</CardTitle>
-                    <CardDescription>Appointment statistics over the past 6 months</CardDescription>
-                  </div>
-                  <Button variant="outline" size="sm">
-                    <Download className="w-4 h-4 mr-2" />
-                    Export
-                  </Button>
-                </div>
+                <CardTitle>Monthly Appointment Trends</CardTitle>
+                <CardDescription>
+                  Appointment statistics over the past 6 months
+                </CardDescription>
               </CardHeader>
               <CardContent>
                 <ResponsiveContainer width="100%" height={300}>
-                  <LineChart data={appointmentData}>
+                  <LineChart data={data?.monthly ?? []}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                     <XAxis dataKey="month" stroke="#999" />
-                    <YAxis stroke="#999" />
+                    <YAxis stroke="#999" allowDecimals={false} />
                     <Tooltip
                       contentStyle={{
                         backgroundColor: 'white',
@@ -221,23 +299,17 @@ export function NewAnalyticsPage({ onNavigate }: NewAnalyticsPageProps) {
           >
             <Card className="hover:shadow-lg transition-shadow">
               <CardHeader>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <CardTitle>Weekly Appointments Breakdown</CardTitle>
-                    <CardDescription>Current month week-by-week performance</CardDescription>
-                  </div>
-                  <Button variant="outline" size="sm">
-                    <Download className="w-4 h-4 mr-2" />
-                    Export
-                  </Button>
-                </div>
+                <CardTitle>Weekly Appointments Breakdown</CardTitle>
+                <CardDescription>
+                  Current week, by day (Mon → Sun)
+                </CardDescription>
               </CardHeader>
               <CardContent>
                 <ResponsiveContainer width="100%" height={300}>
-                  <BarChart data={weeklyAppointmentsData}>
+                  <BarChart data={data?.weekly ?? []}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                     <XAxis dataKey="day" stroke="#999" />
-                    <YAxis stroke="#999" />
+                    <YAxis stroke="#999" allowDecimals={false} />
                     <Tooltip
                       contentStyle={{
                         backgroundColor: 'white',
@@ -245,57 +317,31 @@ export function NewAnalyticsPage({ onNavigate }: NewAnalyticsPageProps) {
                         borderRadius: '8px',
                       }}
                     />
-                    <Bar dataKey="booked" fill="#2F80ED" radius={[8, 8, 0, 0]} name="Booked" />
-                    <Bar dataKey="confirmed" fill="#27AE60" radius={[8, 8, 0, 0]} name="Confirmed" />
-                    <Bar dataKey="canceled" fill="#F2994A" radius={[8, 8, 0, 0]} name="Canceled" />
+                    <Legend />
+                    <Bar
+                      dataKey="booked"
+                      fill="#2F80ED"
+                      radius={[8, 8, 0, 0]}
+                      name="Booked"
+                    />
+                    <Bar
+                      dataKey="confirmed"
+                      fill="#27AE60"
+                      radius={[8, 8, 0, 0]}
+                      name="Confirmed"
+                    />
+                    <Bar
+                      dataKey="cancelled"
+                      fill="#F2994A"
+                      radius={[8, 8, 0, 0]}
+                      name="Cancelled"
+                    />
                   </BarChart>
                 </ResponsiveContainer>
               </CardContent>
             </Card>
           </motion.div>
         </div>
-
-        {/* Additional Stats */}
-        <motion.div
-          initial={{ y: 20, opacity: 0 }}
-          animate={{ y: 0, opacity: 1 }}
-          transition={{ delay: 0.6 }}
-        >
-          <Card className="hover:shadow-lg transition-shadow">
-            <CardHeader>
-              <CardTitle>Performance Metrics</CardTitle>
-              <CardDescription>Key performance indicators for this month</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-6">
-                {[
-                  { label: 'Patient Satisfaction Score', value: 96, color: '#27AE60' },
-                  { label: 'Appointment Show-up Rate', value: 92, color: '#2F80ED' },
-                  { label: 'AI Receptionist Efficiency', value: 94, color: '#56CCF2' },
-                  { label: 'Average Wait Time (mins)', value: 15, color: '#F2994A', isInverted: true },
-                ].map((metric, index) => (
-                  <div key={index} className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm text-gray-600">{metric.label}</span>
-                      <span className="text-sm font-medium" style={{ color: metric.color }}>
-                        {metric.isInverted ? `${metric.value} mins` : `${metric.value}%`}
-                      </span>
-                    </div>
-                    <div className="h-3 bg-gray-100 rounded-full overflow-hidden">
-                      <motion.div
-                        initial={{ width: 0 }}
-                        animate={{ width: metric.isInverted ? '85%' : `${metric.value}%` }}
-                        transition={{ duration: 1, delay: 0.7 + index * 0.1 }}
-                        className="h-full rounded-full"
-                        style={{ backgroundColor: metric.color }}
-                      />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        </motion.div>
       </div>
     </div>
   );
