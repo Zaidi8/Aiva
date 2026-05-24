@@ -46,3 +46,6 @@ next-env.d.ts
 
 # MCP server config — local-only
 .mcp.json
+
+# Audit screenshots
+/audit-*.png
