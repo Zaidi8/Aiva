@@ -1,9 +1,9 @@
 'use client';
 
-import { NewAIReceptionistPage } from '@/components/pages/NewAIReceptionistPage';
+import { AIReceptionistPage } from '@/components/pages/AIReceptionistPage';
 import { useRouter } from 'next/navigation';
 
-export default function AIReceptionistPage() {
+export default function AIReceptionistRoute() {
   const router = useRouter();
 
   const handleNavigate = (page: string, subPage?: string) => {
@@ -14,5 +14,5 @@ export default function AIReceptionistPage() {
     }
   };
 
-  return <NewAIReceptionistPage onNavigate={handleNavigate} />;
+  return <AIReceptionistPage onNavigate={handleNavigate} />;
 }

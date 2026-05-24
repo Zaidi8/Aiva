@@ -3,7 +3,7 @@ import { Bot, User, Phone, Volume2, PhoneOff, Star } from 'lucide-react';
 import { ScrollArea } from './scroll-area';
 import { Button } from './button';
 import { Badge } from './badge';
-import type { CallTranscriptSegment } from '../../data/mockData';
+import type { CallTranscriptSegment } from '@/types';
 
 interface CallRecordProps {
   transcript: CallTranscriptSegment[];

@@ -1,7 +1,7 @@
 import { motion } from 'motion/react';
 import { Bot, User } from 'lucide-react';
 import { ScrollArea } from './scroll-area';
-import type { CallTranscriptSegment } from '../../data/mockData';
+import type { CallTranscriptSegment } from '@/types';
 
 interface ChatConversationProps {
   messages: CallTranscriptSegment[];

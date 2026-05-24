@@ -1,5 +1,5 @@
-import { NewLoginPage } from '@/components/pages/NewLoginPage';
+import { LoginPage } from '@/components/pages/LoginPage';
 
-export default function LoginPage() {
-  return <NewLoginPage />;
+export default function LoginRoute() {
+  return <LoginPage />;
 }

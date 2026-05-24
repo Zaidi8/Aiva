@@ -1,9 +1,34 @@
-import { Download, TrendingUp, Calendar, Users, Bot, DollarSign, Filter } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../ui/card';
+'use client';
+
+// Analytics page — pulls totals + chart series from /api/analytics.
+//
+// The "Appointment Type" filter is UI-only for now (the backend doesn't
+// segment by type yet). The "Time Range" filter maps to /api/analytics's
+// `range` query param: this-week | this-month | last-30d | this-year.
+// Changing it re-fetches the payload, and the charts re-bind reactively.
+//
+// We drop the previous static literal cards (1,284 patients / 18.7% growth)
+// and the Performance Metrics card whose values were entirely fabricated.
+
+import { useEffect, useState } from 'react';
+import { TrendingUp, Users, Calendar, Activity, Download } from 'lucide-react';
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+} from '../ui/card';
 import { Button } from '../ui/button';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
-import DateRangePicker from '../ui/date-range-picker';
-import { useState } from 'react';
+import { TopBar } from '../ui/TopBar';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '../ui/select';
+import { motion } from 'motion/react';
 import {
   LineChart,
   Line,
@@ -14,319 +39,309 @@ import {
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
-  PieChart,
-  Pie,
-  Cell,
+  Legend,
 } from 'recharts';
+import { apiGet } from '@/lib/client/fetcher';
 
-interface DateRange {
-  start: string | null;
-  end: string | null;
+type AnalyticsRange = 'this-week' | 'this-month' | 'last-30d' | 'this-year';
+
+interface AnalyticsPayload {
+  range: AnalyticsRange;
+  totals: {
+    totalPatients: number;
+    appointmentsInRange: number;
+    completedInRange: number;
+    growthRatePct: number;
+  };
+  monthly: Array<{ month: string; appointments: number; completed: number }>;
+  weekly: Array<{
+    day: string;
+    booked: number;
+    confirmed: number;
+    cancelled: number;
+  }>;
 }
 
-const appointmentTrends = [
-  { month: 'Jun', appointments: 180 },
-  { month: 'Jul', appointments: 210 },
-  { month: 'Aug', appointments: 195 },
-  { month: 'Sep', appointments: 240 },
-  { month: 'Oct', appointments: 265 },
-  { month: 'Nov', appointments: 290 },
+interface AnalyticsPageProps {
+  onNavigate?: (page: string) => void;
+}
+
+const RANGE_OPTIONS: { value: AnalyticsRange; label: string }[] = [
+  { value: 'this-week', label: 'This Week' },
+  { value: 'this-month', label: 'This Month' },
+  { value: 'last-30d', label: 'Last 30 Days' },
+  { value: 'this-year', label: 'This Year' },
 ];
 
-const appointmentTypes = [
-  { name: 'Checkup', value: 35, color: '#2F80ED' },
-  { name: 'Follow-up', value: 25, color: '#56CCF2' },
-  { name: 'Consultation', value: 20, color: '#27AE60' },
-  { name: 'Emergency', value: 15, color: '#F2994A' },
-  { name: 'Surgery', value: 5, color: '#EB5757' },
-];
+function formatPct(n: number): string {
+  const sign = n >= 0 ? '+' : '';
+  return `${sign}${n.toFixed(1)}%`;
+}
 
-const aiPerformanceData = [
-  { month: 'Jun', calls: 850, success: 88 },
-  { month: 'Jul', calls: 920, success: 90 },
-  { month: 'Aug', calls: 880, success: 89 },
-  { month: 'Sep', calls: 1050, success: 92 },
-  { month: 'Oct', calls: 1150, success: 93 },
-  { month: 'Nov', calls: 1280, success: 94 },
-];
+export function AnalyticsPage({
+  onNavigate: _onNavigate,
+}: AnalyticsPageProps) {
+  void _onNavigate;
+  const [range, setRange] = useState<AnalyticsRange>('this-month');
+  const [data, setData] = useState<AnalyticsPayload | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-export function AnalyticsPage() {
-  const [dateRange, setDateRange] = useState<DateRange>({ start: null, end: null });
-  const [metricFilter, setMetricFilter] = useState('all');
-  const [timeRange, setTimeRange] = useState('6months');
+  useEffect(() => {
+    // loading defaults to true on first mount, and on subsequent range
+    // changes we let the next .then() flip it. We don't pre-set loading here
+    // (which would trigger react-hooks/set-state-in-effect); the brief stale
+    // data while refetching is fine since the cards just show the old values.
+    let cancelled = false;
+    apiGet<AnalyticsPayload>(`/api/analytics?range=${range}`)
+      .then((res) => {
+        if (cancelled) return;
+        setData(res);
+        setError(null);
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        setError(e instanceof Error ? e.message : 'Failed to load analytics.');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [range]);
+
+  const totals = data?.totals ?? {
+    totalPatients: 0,
+    appointmentsInRange: 0,
+    completedInRange: 0,
+    growthRatePct: 0,
+  };
+
+  const metricCards = [
+    {
+      label: 'Total Patients',
+      value: totals.totalPatients,
+      icon: Users,
+      color: '#2F80ED',
+      hint: 'All-time',
+    },
+    {
+      label: 'Appointments (range)',
+      value: totals.appointmentsInRange,
+      icon: Calendar,
+      color: '#56CCF2',
+      hint: data ? RANGE_OPTIONS.find((r) => r.value === data.range)?.label : '',
+    },
+    {
+      label: 'Completed (range)',
+      value: totals.completedInRange,
+      icon: Activity,
+      color: '#27AE60',
+      hint: data ? RANGE_OPTIONS.find((r) => r.value === data.range)?.label : '',
+    },
+    {
+      label: 'Growth vs prev',
+      value: formatPct(totals.growthRatePct),
+      icon: TrendingUp,
+      color: totals.growthRatePct >= 0 ? '#27AE60' : '#EB5757',
+      hint: 'Appointments',
+    },
+  ];
 
   return (
     <div className="min-h-screen bg-[#F7F9FB]">
-      {/* Header */}
-      <div className="bg-white border-b border-gray-200 px-8 py-6">
-        <div className="flex items-center justify-between max-w-7xl mx-auto">
-          <div>
-            <h1 className="text-3xl text-[#333333]">Analytics & Reports</h1>
-            <p className="text-gray-600 mt-1">Performance insights and data visualization</p>
-          </div>
-          <Button className="bg-[#2F80ED] hover:bg-[#2F80ED]/90">
-            <Download className="w-4 h-4 mr-2" />
-            Export Report
-          </Button>
-        </div>
-      </div>
+      <TopBar
+        title="Analytics & Reports"
+        description="Comprehensive insights into clinic performance"
+      />
 
-      {/* Content */}
-      <div className="p-8 max-w-7xl mx-auto">
-        
+      <div className="p-8 max-w-7xl mx-auto space-y-8">
+        {/* Filters */}
+        <motion.div
+          initial={{ y: -20, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          className="flex flex-col sm:flex-row gap-4 bg-white p-4 rounded-xl shadow-sm"
+        >
+          <div className="flex-1">
+            <label className="text-sm text-gray-600 mb-2 block">
+              Time Range
+            </label>
+            <Select
+              value={range}
+              onValueChange={(v) => setRange(v as AnalyticsRange)}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Select time range" />
+              </SelectTrigger>
+              <SelectContent>
+                {RANGE_OPTIONS.map((opt) => (
+                  <SelectItem key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex items-end">
+            <Button
+              variant="outline"
+              className="w-full sm:w-auto"
+              disabled
+              title="Export not implemented yet"
+            >
+              <Download className="w-4 h-4 mr-2" />
+              Export Report
+            </Button>
+          </div>
+        </motion.div>
+
+        {error && (
+          <div className="rounded-md border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700">
+            {error}
+          </div>
+        )}
+
         {/* Key Metrics */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-12">
-          <Card className="hover:shadow-lg transition-shadow">
-            <CardContent className="p-6">
-              <div className="flex items-start justify-between">
-                <div>
-                  <p className="text-sm text-gray-600 mb-1">Total Appointments</p>
-                  <p className="text-3xl text-[#333333] mb-1">1,247</p>
-                  <div className="flex items-center gap-1 text-sm text-[#27AE60]">
-                    <TrendingUp className="w-4 h-4" />
-                    <span>+12% vs last month</span>
-                  </div>
-                </div>
-                <div className="w-12 h-12 bg-[#2F80ED]/10 rounded-full flex items-center justify-center">
-                  <Calendar className="w-6 h-6 text-[#2F80ED]" />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="hover:shadow-lg transition-shadow">
-            <CardContent className="p-6">
-              <div className="flex items-start justify-between">
-                <div>
-                  <p className="text-sm text-gray-600 mb-1">Active Patients</p>
-                  <p className="text-3xl text-[#333333] mb-1">248</p>
-                  <div className="flex items-center gap-1 text-sm text-[#27AE60]">
-                    <TrendingUp className="w-4 h-4" />
-                    <span>+8% vs last month</span>
-                  </div>
-                </div>
-                <div className="w-12 h-12 bg-[#27AE60]/10 rounded-full flex items-center justify-center">
-                  <Users className="w-6 h-6 text-[#27AE60]" />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="hover:shadow-lg transition-shadow">
-            <CardContent className="p-6">
-              <div className="flex items-start justify-between">
-                <div>
-                  <p className="text-sm text-gray-600 mb-1">AI Success Rate</p>
-                  <p className="text-3xl text-[#333333] mb-1">94%</p>
-                  <div className="flex items-center gap-1 text-sm text-[#27AE60]">
-                    <TrendingUp className="w-4 h-4" />
-                    <span>+2% vs last month</span>
-                  </div>
-                </div>
-                <div className="w-12 h-12 bg-[#56CCF2]/10 rounded-full flex items-center justify-center">
-                  <Bot className="w-6 h-6 text-[#56CCF2]" />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="hover:shadow-lg transition-shadow">
-            <CardContent className="p-6">
-              <div className="flex items-start justify-between">
-                <div>
-                  <p className="text-sm text-gray-600 mb-1">Revenue</p>
-                  <p className="text-3xl text-[#333333] mb-1">$45.2K</p>
-                  <div className="flex items-center gap-1 text-sm text-[#27AE60]">
-                    <TrendingUp className="w-4 h-4" />
-                    <span>+15% vs last month</span>
-                  </div>
-                </div>
-                <div className="w-12 h-12 bg-[#F2994A]/10 rounded-full flex items-center justify-center">
-                  <DollarSign className="w-6 h-6 text-[#F2994A]" />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Filter Bar */}
-        <div className="mb-8">
-          <Card>
-            <CardContent className="p-6">
-              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
-                <div className="flex items-center gap-2">
-                  <Filter className="w-5 h-5 text-gray-600" />
-                  <span className="text-sm font-medium text-gray-700">Filters:</span>
-                </div>
-                <div className="flex flex-col sm:flex-row gap-4 flex-1">
-                  <Select value={timeRange} onValueChange={setTimeRange}>
-                    <SelectTrigger className="w-full sm:w-48 h-12">
-                      <SelectValue placeholder="Time Range" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="7days">Last 7 Days</SelectItem>
-                      <SelectItem value="30days">Last 30 Days</SelectItem>
-                      <SelectItem value="3months">Last 3 Months</SelectItem>
-                      <SelectItem value="6months">Last 6 Months</SelectItem>
-                      <SelectItem value="1year">Last Year</SelectItem>
-                      <SelectItem value="custom">Custom Range</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  
-                  <Select value={metricFilter} onValueChange={setMetricFilter}>
-                    <SelectTrigger className="w-full sm:w-48 h-12">
-                      <SelectValue placeholder="Metric Type" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Metrics</SelectItem>
-                      <SelectItem value="appointments">Appointments Only</SelectItem>
-                      <SelectItem value="patients">Patients Only</SelectItem>
-                      <SelectItem value="ai">AI Performance</SelectItem>
-                      <SelectItem value="revenue">Revenue Only</SelectItem>
-                    </SelectContent>
-                  </Select>
-
-                  <DateRangePicker value={dateRange} onChange={setDateRange} />
-                  
-                  {(dateRange.start || dateRange.end || metricFilter !== 'all' || timeRange !== '6months') && (
-                    <Button
-                      variant="outline"
-                      onClick={() => {
-                        setDateRange({ start: null, end: null });
-                        setMetricFilter('all');
-                        setTimeRange('6months');
-                      }}
-                      className="h-12"
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+          {metricCards.map((metric, index) => (
+            <motion.div
+              key={index}
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              transition={{ delay: index * 0.1 }}
+              whileHover={{ scale: 1.05, y: -5 }}
+            >
+              <Card className="hover:shadow-lg transition-all cursor-pointer border-none">
+                <CardContent className="p-6">
+                  <div className="flex items-center justify-between mb-4">
+                    <div
+                      className="w-12 h-12 rounded-xl flex items-center justify-center"
+                      style={{ backgroundColor: `${metric.color}15` }}
                     >
-                      Clear Filters
-                    </Button>
-                  )}
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Appointment Trends */}
-        <div className="mb-12">
-          <Card>
-            <CardHeader>
-              <CardTitle>Appointment Trends</CardTitle>
-              <CardDescription>Monthly appointment volume over the last 6 months</CardDescription>
-            </CardHeader>
-            <CardContent className="pt-6">
-              <ResponsiveContainer width="100%" height={300}>
-                <LineChart data={appointmentTrends}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#E0E0E0" />
-                  <XAxis dataKey="month" stroke="#666" />
-                  <YAxis stroke="#666" />
-                  <Tooltip />
-                  <Line
-                    type="monotone"
-                    dataKey="appointments"
-                    stroke="#2F80ED"
-                    strokeWidth={3}
-                    dot={{ fill: '#2F80ED', r: 5 }}
-                  />
-                </LineChart>
-              </ResponsiveContainer>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Charts Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-12">
-          {/* AI Performance */}
-          <Card>
-            <CardHeader>
-              <CardTitle>AI Receptionist Performance</CardTitle>
-              <CardDescription>Call volume and success rate trends</CardDescription>
-            </CardHeader>
-            <CardContent className="pt-6">
-              <ResponsiveContainer width="100%" height={300}>
-                <BarChart data={aiPerformanceData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#E0E0E0" />
-                  <XAxis dataKey="month" stroke="#666" />
-                  <YAxis stroke="#666" />
-                  <Tooltip />
-                  <Bar dataKey="calls" fill="#2F80ED" radius={[8, 8, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </CardContent>
-          </Card>
-
-          {/* Appointment Types */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Appointment Types Distribution</CardTitle>
-              <CardDescription>Breakdown by appointment category</CardDescription>
-            </CardHeader>
-            <CardContent className="pt-6">
-              <div className="flex items-center justify-between">
-                <ResponsiveContainer width="50%" height={250}>
-                  <PieChart>
-                    <Pie
-                      data={appointmentTypes}
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={60}
-                      outerRadius={100}
-                      paddingAngle={2}
-                      dataKey="value"
-                    >
-                      {appointmentTypes.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={entry.color} />
-                      ))}
-                    </Pie>
-                  </PieChart>
-                </ResponsiveContainer>
-                <div className="space-y-3">
-                  {appointmentTypes.map((type) => (
-                    <div key={type.name} className="flex items-center gap-3">
-                      <div 
-                        className="w-3 h-3 rounded-full" 
-                        style={{ backgroundColor: type.color }}
-                      ></div>
-                      <span className="text-sm text-gray-600">{type.name}</span>
-                      <span className="text-sm text-[#333333] ml-auto">{type.value}%</span>
+                      <metric.icon
+                        className="w-6 h-6"
+                        style={{ color: metric.color }}
+                      />
                     </div>
-                  ))}
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+                    {metric.hint && (
+                      <span className="text-xs text-gray-500">
+                        {metric.hint}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-sm text-gray-600 mb-1">{metric.label}</p>
+                  <p className="text-3xl text-[#333333]">
+                    {loading ? '…' : metric.value}
+                  </p>
+                </CardContent>
+              </Card>
+            </motion.div>
+          ))}
         </div>
 
-        {/* Performance Highlights */}
-        <div>
-          <h2 className="text-2xl text-[#333333] mb-6">Performance Highlights</h2>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <Card className="border-l-4 border-l-[#27AE60]">
-              <CardContent className="p-6">
-                <h3 className="text-sm text-gray-600 mb-2">Best Performing Day</h3>
-                <p className="text-2xl text-[#333333] mb-1">Thursday</p>
-                <p className="text-sm text-gray-500">Average 55 appointments</p>
+        {/* Charts */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          {/* Monthly Appointments Chart */}
+          <motion.div
+            initial={{ y: 20, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            transition={{ delay: 0.4 }}
+          >
+            <Card className="hover:shadow-lg transition-shadow">
+              <CardHeader>
+                <CardTitle>Monthly Appointment Trends</CardTitle>
+                <CardDescription>
+                  Appointment statistics over the past 6 months
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <ResponsiveContainer width="100%" height={300}>
+                  <LineChart data={data?.monthly ?? []}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                    <XAxis dataKey="month" stroke="#999" />
+                    <YAxis stroke="#999" allowDecimals={false} />
+                    <Tooltip
+                      contentStyle={{
+                        backgroundColor: 'white',
+                        border: '1px solid #e0e0e0',
+                        borderRadius: '8px',
+                      }}
+                    />
+                    <Legend />
+                    <Line
+                      type="monotone"
+                      dataKey="appointments"
+                      stroke="#2F80ED"
+                      strokeWidth={3}
+                      dot={{ fill: '#2F80ED', r: 5 }}
+                      name="Total Appointments"
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="completed"
+                      stroke="#27AE60"
+                      strokeWidth={3}
+                      dot={{ fill: '#27AE60', r: 5 }}
+                      name="Completed"
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
               </CardContent>
             </Card>
+          </motion.div>
 
-            <Card className="border-l-4 border-l-[#2F80ED]">
-              <CardContent className="p-6">
-                <h3 className="text-sm text-gray-600 mb-2">Peak Hours</h3>
-                <p className="text-2xl text-[#333333] mb-1">10 AM - 2 PM</p>
-                <p className="text-sm text-gray-500">Highest booking activity</p>
+          {/* Weekly Appointments Chart */}
+          <motion.div
+            initial={{ y: 20, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            transition={{ delay: 0.5 }}
+          >
+            <Card className="hover:shadow-lg transition-shadow">
+              <CardHeader>
+                <CardTitle>Weekly Appointments Breakdown</CardTitle>
+                <CardDescription>
+                  Current week, by day (Mon → Sun)
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <ResponsiveContainer width="100%" height={300}>
+                  <BarChart data={data?.weekly ?? []}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                    <XAxis dataKey="day" stroke="#999" />
+                    <YAxis stroke="#999" allowDecimals={false} />
+                    <Tooltip
+                      contentStyle={{
+                        backgroundColor: 'white',
+                        border: '1px solid #e0e0e0',
+                        borderRadius: '8px',
+                      }}
+                    />
+                    <Legend />
+                    <Bar
+                      dataKey="booked"
+                      fill="#2F80ED"
+                      radius={[8, 8, 0, 0]}
+                      name="Booked"
+                    />
+                    <Bar
+                      dataKey="confirmed"
+                      fill="#27AE60"
+                      radius={[8, 8, 0, 0]}
+                      name="Confirmed"
+                    />
+                    <Bar
+                      dataKey="cancelled"
+                      fill="#F2994A"
+                      radius={[8, 8, 0, 0]}
+                      name="Cancelled"
+                    />
+                  </BarChart>
+                </ResponsiveContainer>
               </CardContent>
             </Card>
-
-            <Card className="border-l-4 border-l-[#56CCF2]">
-              <CardContent className="p-6">
-                <h3 className="text-sm text-gray-600 mb-2">Average Wait Time</h3>
-                <p className="text-2xl text-[#333333] mb-1">12 mins</p>
-                <p className="text-sm text-gray-500">Below target of 15 mins</p>
-              </CardContent>
-            </Card>
-          </div>
+          </motion.div>
         </div>
-
       </div>
     </div>
   );

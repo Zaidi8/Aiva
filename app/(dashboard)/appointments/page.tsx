@@ -9,9 +9,9 @@
 
 import { requireStaff } from '@/lib/auth';
 import { listAppointments } from '@/lib/appointments/queries';
-import { ImprovedAppointmentsPage } from '@/components/pages/ImprovedAppointmentsPage';
+import { AppointmentsPage } from '@/components/pages/AppointmentsPage';
 
-export default async function AppointmentsPage() {
+export default async function AppointmentsRoute() {
   const staff = await requireStaff();
   const { items, total } = await listAppointments(staff, { take: 100 });
 
@@ -19,7 +19,7 @@ export default async function AppointmentsPage() {
   const pending = items.filter((a) => a.status === 'Pending').length;
 
   return (
-    <ImprovedAppointmentsPage
+    <AppointmentsPage
       initialAppointments={items.map((a) => ({
         id: a.id,
         scheduledAt: a.scheduledAt.toISOString(),

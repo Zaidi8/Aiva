@@ -8,14 +8,14 @@
 //   3. Read `?tab=` from the URL so deep-links from the sidebar still land
 //      on the right tab (Profile / AI / Notifications / Security / Appearance).
 //
-// All form state + PATCH plumbing lives in NewSettingsPage on the client.
+// All form state + PATCH plumbing lives in SettingsPage on the client.
 
 import { Suspense } from 'react';
 import { requireStaff } from '@/lib/auth';
 import { getClinic } from '@/lib/clinics/queries';
 import { getAiSettings } from '@/lib/ai-settings/queries';
 import { updateAiSettings } from '@/lib/ai-settings/mutations';
-import { NewSettingsPage } from '@/components/pages/NewSettingsPage';
+import { SettingsPage } from '@/components/pages/SettingsPage';
 
 type SearchParams = Promise<{ tab?: string }>;
 
@@ -30,7 +30,7 @@ async function SettingsPageContent({ tab }: { tab: string }) {
   const aiSettings = aiSettingsMaybe ?? (await updateAiSettings(staff, {}));
 
   return (
-    <NewSettingsPage
+    <SettingsPage
       initialTab={tab}
       initialStaff={{
         fullName: staff.fullName,
@@ -59,7 +59,7 @@ async function SettingsPageContent({ tab }: { tab: string }) {
   );
 }
 
-export default async function SettingsPage({
+export default async function SettingsRoute({
   searchParams,
 }: {
   searchParams: SearchParams;

@@ -1,9 +1,9 @@
 'use client';
 
-import { NewUIKitPage } from '@/components/pages/NewUIKitPage';
+import { UIKitPage } from '@/components/pages/UIKitPage';
 import { useRouter } from 'next/navigation';
 
-export default function UIKitPage() {
+export default function UIKitRoute() {
   const router = useRouter();
 
   const handleNavigate = (page: string, subPage?: string) => {
@@ -14,5 +14,5 @@ export default function UIKitPage() {
     }
   };
 
-  return <NewUIKitPage onNavigate={handleNavigate} />;
+  return <UIKitPage onNavigate={handleNavigate} />;
 }

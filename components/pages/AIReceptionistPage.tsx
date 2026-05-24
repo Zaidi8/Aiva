@@ -1,249 +1,596 @@
-import { Bot, Phone, MessageSquare, TrendingUp, PlayCircle, CheckCircle, XCircle } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../ui/card';
+'use client';
+
+// AI Receptionist page — call log viewer.
+//
+// Sources of truth: /api/calls and /api/dashboard-summary. Both are
+// tenant-scoped. The new-clinic empty state shows "0 calls yet — once your
+// phone is connected, calls appear here" so a fresh registration doesn't see
+// fake transcripts.
+//
+// Compared to the original mock-data version we drop:
+//   • the showLargeDataset / showEmptyState DevControls toggles (irrelevant
+//     once we're rendering real DB rows),
+//   • the dialog showing "mockNotifications" (the TopBar bell owns those),
+//   • the fictional sentiment/callQuality fields the mock data carried that
+//     CallLog rows don't always have populated yet.
+//
+// CallLog.transcript is stored as a JSON blob with shape
+//   [{ role: 'ai'|'user'|'patient', text: string, timestamp?: string }, ...]
+// when the voice runtime writes to it. We parse it defensively — older or
+// partially-completed rows may have an empty array or null.
+
+import { useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import {
+  Bot,
+  Phone,
+  TrendingUp,
+  CheckCircle,
+  Search,
+  X,
+  PhoneCall,
+  Clock,
+  PhoneIncoming,
+  PhoneOutgoing,
+  PhoneMissed,
+  Activity,
+  User,
+  Calendar,
+  FileText,
+  ChevronRight,
+} from 'lucide-react';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
+import { Input } from '../ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '../ui/select';
 import { ScrollArea } from '../ui/scroll-area';
+import { TopBar } from '../ui/TopBar';
+import { StatsBar } from '../ui/StatsBar';
+import { motion, AnimatePresence } from 'motion/react';
+import { apiGet } from '@/lib/client/fetcher';
 
-const callLogs = [
-  {
-    id: 1,
-    caller: 'John Smith',
-    phone: '555-0101',
-    time: '10:45 AM',
-    duration: '3:24',
-    type: 'booking',
-    status: 'success',
-    summary: 'Booked appointment for Nov 15 with Dr. Williams',
-  },
-  {
-    id: 2,
-    caller: 'Sarah Johnson',
-    phone: '555-0102',
-    time: '10:30 AM',
-    duration: '2:15',
-    type: 'inquiry',
-    status: 'success',
-    summary: 'Provided clinic hours and location information',
-  },
-  {
-    id: 3,
-    caller: 'Michael Davis',
-    phone: '555-0103',
-    time: '10:15 AM',
-    duration: '4:10',
-    type: 'reschedule',
-    status: 'success',
-    summary: 'Rescheduled appointment from Nov 10 to Nov 12',
-  },
-  {
-    id: 4,
-    caller: 'Emily Wilson',
-    phone: '555-0104',
-    time: '09:50 AM',
-    duration: '1:45',
-    type: 'cancellation',
-    status: 'transferred',
-    summary: 'Transferred to staff for complex cancellation',
-  },
-  {
-    id: 5,
-    caller: 'David Brown',
-    phone: '555-0105',
-    time: '09:30 AM',
-    duration: '2:45',
-    type: 'booking',
-    status: 'success',
-    summary: 'Booked appointment for Nov 18 with Dr. Brown',
-  },
-];
+interface AIReceptionistPageProps {
+  onNavigate?: (page: string) => void;
+}
 
-export function AIReceptionistPage() {
+interface ApiCallLog {
+  id: string;
+  patientPhone: string;
+  durationSec: number;
+  detectedIntent: 'Booking' | 'Reschedule' | 'Cancellation' | 'Inquiry' | null;
+  outcome: 'Completed' | 'Assisted' | 'Transferred' | 'Failed';
+  transcript: unknown;
+  sentiment: 'Positive' | 'Neutral' | 'Negative' | null;
+  startedAt: string;
+  endedAt: string | null;
+  patient: { id: string; fullName: string } | null;
+}
+
+interface CallsPayload {
+  items: ApiCallLog[];
+  total: number;
+}
+
+interface DashboardSummary {
+  callsHandledToday: number;
+  bookingsMadeToday: number;
+  successRate: number;
+}
+
+interface TranscriptSegment {
+  role: string;
+  text: string;
+  timestamp?: string;
+}
+
+const PANEL_HEIGHT = 520;
+
+function formatDurationSec(sec: number): string {
+  if (!sec) return '0:00';
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+function formatTime(iso: string | null): string {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '—';
+  return d.toLocaleTimeString('en-US', {
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  });
+}
+
+function parseTranscript(raw: unknown): TranscriptSegment[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((s) => s && typeof s === 'object')
+    .map((s) => {
+      const obj = s as Record<string, unknown>;
+      return {
+        role: typeof obj.role === 'string' ? obj.role : 'ai',
+        text: typeof obj.text === 'string' ? obj.text : '',
+        timestamp:
+          typeof obj.timestamp === 'string' ? obj.timestamp : undefined,
+      };
+    });
+}
+
+function intentIcon(intent: ApiCallLog['detectedIntent']) {
+  switch (intent) {
+    case 'Booking':
+      return Calendar;
+    case 'Inquiry':
+      return PhoneIncoming;
+    case 'Reschedule':
+      return PhoneOutgoing;
+    case 'Cancellation':
+      return PhoneMissed;
+    default:
+      return Phone;
+  }
+}
+
+function outcomeStyle(outcome: ApiCallLog['outcome']): {
+  label: string;
+  className: string;
+} {
+  switch (outcome) {
+    case 'Completed':
+      return { label: 'Completed', className: 'bg-[#27AE60]/10 text-[#27AE60]' };
+    case 'Assisted':
+      return { label: 'Assisted', className: 'bg-[#F2994A]/10 text-[#F2994A]' };
+    case 'Transferred':
+      return { label: 'Transferred', className: 'bg-[#2F80ED]/10 text-[#2F80ED]' };
+    case 'Failed':
+    default:
+      return { label: 'Failed', className: 'bg-[#EB5757]/10 text-[#EB5757]' };
+  }
+}
+
+function intentLabel(intent: ApiCallLog['detectedIntent']): string {
+  return intent ?? 'Unknown';
+}
+
+export function AIReceptionistPage({
+  onNavigate: _onNavigate,
+}: AIReceptionistPageProps) {
+  void _onNavigate;
+  const router = useRouter();
+  const [calls, setCalls] = useState<ApiCallLog[]>([]);
+  const [summary, setSummary] = useState<DashboardSummary | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [selectedCallId, setSelectedCallId] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [outcomeFilter, setOutcomeFilter] = useState('all');
+
+  useEffect(() => {
+    // loading defaults to true; error defaults to null. We avoid the redundant
+    // synchronous setState here so the react-hooks/set-state-in-effect rule
+    // doesn't flag this legitimate fetch-on-mount.
+    let cancelled = false;
+    Promise.all([
+      apiGet<CallsPayload>('/api/calls?take=50'),
+      apiGet<DashboardSummary>('/api/dashboard-summary'),
+    ])
+      .then(([callsRes, summaryRes]) => {
+        if (cancelled) return;
+        setCalls(callsRes.items);
+        setSummary(summaryRes);
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        setError(e instanceof Error ? e.message : 'Failed to load calls.');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [router]);
+
+  const filteredCalls = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    return calls.filter((call) => {
+      const name = call.patient?.fullName ?? '';
+      const matchesSearch =
+        !q ||
+        name.toLowerCase().includes(q) ||
+        call.patientPhone.toLowerCase().includes(q);
+      const matchesOutcome =
+        outcomeFilter === 'all' || call.outcome === outcomeFilter;
+      return matchesSearch && matchesOutcome;
+    });
+  }, [calls, searchQuery, outcomeFilter]);
+
+  // Pick the active call: explicit selection wins, otherwise default to the
+  // first item in the filtered list. Computing it during render (rather than
+  // syncing via an effect) avoids react-hooks/set-state-in-effect and an
+  // extra paint cycle on first load.
+  const selectedCall =
+    (selectedCallId && filteredCalls.find((c) => c.id === selectedCallId)) ||
+    filteredCalls[0] ||
+    null;
+  const selectedTranscript = useMemo(
+    () => (selectedCall ? parseTranscript(selectedCall.transcript) : []),
+    [selectedCall],
+  );
+
+  const stats = [
+    {
+      label: 'Calls Handled Today',
+      value: summary?.callsHandledToday ?? 0,
+      icon: PhoneCall,
+      color: '#2F80ED',
+    },
+    {
+      label: 'Successful Bookings',
+      value: summary?.bookingsMadeToday ?? 0,
+      icon: CheckCircle,
+      color: '#27AE60',
+    },
+    {
+      label: 'Success Rate',
+      value: summary ? `${summary.successRate}%` : '—',
+      icon: TrendingUp,
+      color: '#56CCF2',
+    },
+    {
+      label: 'Total Calls (recent)',
+      value: calls.length,
+      icon: Clock,
+      color: '#F2994A',
+    },
+  ];
+
   return (
     <div className="min-h-screen bg-[#F7F9FB]">
-      {/* Header */}
-      <div className="bg-white border-b border-gray-200 px-8 py-6">
-        <div className="flex items-center justify-between max-w-7xl mx-auto">
-          <div>
-            <h1 className="text-3xl text-[#333333]">AI Receptionist</h1>
-            <p className="text-gray-600 mt-1">Monitor and manage AI virtual assistant activity</p>
+      <TopBar title="AI Receptionist" />
+
+      <div className="p-8 max-w-7xl mx-auto flex flex-col gap-6">
+        <StatsBar stats={stats} />
+
+        {/* Filters */}
+        <motion.div
+          initial={{ y: -10, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          className="flex flex-col sm:flex-row gap-4"
+        >
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
+            <Input
+              placeholder="Search by caller name or phone..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-10 h-12"
+            />
           </div>
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2 px-4 py-2 bg-[#27AE60]/10 text-[#27AE60] rounded-lg">
-              <div className="w-2 h-2 bg-[#27AE60] rounded-full animate-pulse"></div>
-              <span>Online</span>
-            </div>
-            <Button variant="outline">Configure Settings</Button>
-          </div>
-        </div>
-      </div>
+          <Select value={outcomeFilter} onValueChange={setOutcomeFilter}>
+            <SelectTrigger className="w-full sm:w-44 h-12">
+              <SelectValue placeholder="Filter by outcome" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Calls</SelectItem>
+              <SelectItem value="Completed">Completed</SelectItem>
+              <SelectItem value="Assisted">Assisted</SelectItem>
+              <SelectItem value="Transferred">Transferred</SelectItem>
+              <SelectItem value="Failed">Failed</SelectItem>
+            </SelectContent>
+          </Select>
+        </motion.div>
 
-      {/* Content */}
-      <div className="p-8 max-w-7xl mx-auto">
-        
-        {/* Status Overview */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-12">
-          <Card className="bg-gradient-to-br from-[#2F80ED] to-[#56CCF2] text-white">
-            <CardContent className="p-6">
-              <div className="flex items-center justify-between mb-2">
-                <Phone className="w-8 h-8" />
-              </div>
-              <div className="text-3xl mb-1">47</div>
-              <p className="text-sm opacity-90">Calls Handled Today</p>
-            </CardContent>
-          </Card>
-
-          <Card className="hover:shadow-lg transition-shadow">
-            <CardContent className="p-6">
-              <div className="flex items-center justify-between mb-2">
-                <CheckCircle className="w-8 h-8 text-[#27AE60]" />
-              </div>
-              <div className="text-3xl text-[#333333] mb-1">32</div>
-              <p className="text-sm text-gray-600">Successful Bookings</p>
-            </CardContent>
-          </Card>
-
-          <Card className="hover:shadow-lg transition-shadow">
-            <CardContent className="p-6">
-              <div className="flex items-center justify-between mb-2">
-                <TrendingUp className="w-8 h-8 text-[#56CCF2]" />
-              </div>
-              <div className="text-3xl text-[#333333] mb-1">94%</div>
-              <p className="text-sm text-gray-600">Success Rate</p>
-            </CardContent>
-          </Card>
-
-          <Card className="hover:shadow-lg transition-shadow">
-            <CardContent className="p-6">
-              <div className="flex items-center justify-between mb-2">
-                <MessageSquare className="w-8 h-8 text-[#F2994A]" />
-              </div>
-              <div className="text-3xl text-[#333333] mb-1">3:15</div>
-              <p className="text-sm text-gray-600">Avg. Call Duration</p>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* AI Performance Card */}
-        <div className="mb-12">
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle className="flex items-center gap-2">
-                    <Bot className="w-5 h-5 text-[#2F80ED]" />
-                    AI Performance Metrics
-                  </CardTitle>
-                  <CardDescription className="mt-1">Real-time insights into AI assistant performance</CardDescription>
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm text-gray-600">Call Completion Rate</span>
-                    <span className="text-sm text-[#27AE60]">96%</span>
-                  </div>
-                  <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-                    <div className="h-full bg-[#27AE60] rounded-full" style={{ width: '96%' }}></div>
-                  </div>
+        {/* Two-panel layout */}
+        <motion.div
+          initial={{ y: 20, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          transition={{ delay: 0.2 }}
+        >
+          <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
+            {/* ── Call List ── */}
+            <div className="lg:col-span-2">
+              <div
+                className="bg-white rounded-xl border overflow-hidden hover:shadow-lg transition-shadow flex flex-col"
+                style={{ height: PANEL_HEIGHT }}
+              >
+                <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 shrink-0">
+                  <h3 className="text-base font-semibold leading-none">
+                    Recent Calls
+                  </h3>
+                  <span className="text-xs text-gray-500">
+                    {loading ? '…' : `${filteredCalls.length} total`}
+                  </span>
                 </div>
 
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm text-gray-600">Customer Satisfaction</span>
-                    <span className="text-sm text-[#27AE60]">4.6/5</span>
-                  </div>
-                  <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-                    <div className="h-full bg-[#27AE60] rounded-full" style={{ width: '92%' }}></div>
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm text-gray-600">Response Accuracy</span>
-                    <span className="text-sm text-[#27AE60]">98%</span>
-                  </div>
-                  <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-                    <div className="h-full bg-[#27AE60] rounded-full" style={{ width: '98%' }}></div>
-                  </div>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Call Logs */}
-        <div>
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-2xl text-[#333333]">Recent Call Logs</h2>
-            <Button variant="outline" size="sm">View All Logs</Button>
-          </div>
-
-          <Card>
-            <CardContent className="p-6">
-              <ScrollArea className="h-[600px] pr-4">
-                <div className="space-y-4">
-                  {callLogs.map((log) => (
-                    <div 
-                      key={log.id} 
-                      className="p-4 bg-[#F7F9FB] rounded-lg hover:bg-gray-100 transition-colors"
-                    >
-                      <div className="flex items-start justify-between mb-3">
-                        <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 bg-gradient-to-br from-[#2F80ED] to-[#56CCF2] rounded-full flex items-center justify-center text-white">
-                            {log.caller.split(' ').map(n => n[0]).join('')}
-                          </div>
-                          <div>
-                            <h3 className="text-[#333333]">{log.caller}</h3>
-                            <p className="text-sm text-gray-600">{log.phone}</p>
-                          </div>
-                        </div>
-                        <div className="text-right">
-                          <p className="text-sm text-gray-600 mb-1">{log.time}</p>
-                          <Badge 
-                            className={
-                              log.status === 'success' 
-                                ? 'bg-[#27AE60]/10 text-[#27AE60] hover:bg-[#27AE60]/20' 
-                                : 'bg-[#F2994A]/10 text-[#F2994A] hover:bg-[#F2994A]/20'
-                            }
-                          >
-                            {log.status}
-                          </Badge>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-6 mb-3 text-sm text-gray-600">
-                        <span className="flex items-center gap-1">
-                          <Phone className="w-4 h-4" />
-                          {log.duration}
-                        </span>
-                        <Badge variant="outline" className="capitalize">
-                          {log.type}
-                        </Badge>
-                      </div>
-
-                      <p className="text-sm text-gray-700 bg-white p-3 rounded border border-gray-200">
-                        {log.summary}
-                      </p>
-
-                      <div className="mt-3 flex gap-2">
-                        <Button variant="outline" size="sm">
-                          <PlayCircle className="w-4 h-4 mr-1" />
-                          Play Recording
-                        </Button>
-                        <Button variant="outline" size="sm">
-                          View Transcript
-                        </Button>
+                <div className="flex-1 overflow-hidden">
+                  {error ? (
+                    <div className="h-full flex items-center justify-center p-12 text-center">
+                      <div>
+                        <Phone className="w-12 h-12 text-red-300 mx-auto mb-3" />
+                        <h3 className="text-base text-gray-700 mb-1">
+                          Couldn&apos;t load calls
+                        </h3>
+                        <p className="text-sm text-gray-500">{error}</p>
                       </div>
                     </div>
-                  ))}
+                  ) : filteredCalls.length === 0 ? (
+                    <div className="h-full flex items-center justify-center p-12 text-center">
+                      <div>
+                        <Phone className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+                        <h3 className="text-base text-gray-600 mb-1">
+                          {calls.length === 0
+                            ? '0 calls yet'
+                            : 'No Calls Match Filter'}
+                        </h3>
+                        <p className="text-sm text-gray-500">
+                          {calls.length === 0
+                            ? 'Once your phone is connected, calls appear here.'
+                            : 'Try adjusting your search or filters.'}
+                        </p>
+                      </div>
+                    </div>
+                  ) : (
+                    <ScrollArea className="h-full">
+                      <div className="divide-y divide-gray-100">
+                        {filteredCalls.map((call, index) => {
+                          const Icon = intentIcon(call.detectedIntent);
+                          const oStyle = outcomeStyle(call.outcome);
+                          const isSelected = selectedCallId === call.id;
+                          const name =
+                            call.patient?.fullName ?? call.patientPhone;
+                          return (
+                            <motion.div
+                              key={call.id}
+                              initial={{ opacity: 0 }}
+                              animate={{ opacity: 1 }}
+                              transition={{ delay: index * 0.03 }}
+                              onClick={() => setSelectedCallId(call.id)}
+                              className={`relative px-6 py-4 cursor-pointer transition-colors ${
+                                isSelected
+                                  ? 'bg-[#2F80ED]/5'
+                                  : 'hover:bg-gray-50'
+                              }`}
+                            >
+                              {isSelected && (
+                                <div className="absolute left-0 top-3 bottom-3 w-[3px] bg-[#2F80ED] rounded-r-full" />
+                              )}
+                              <div className="flex items-center gap-4">
+                                <div
+                                  className={`w-11 h-11 rounded-full flex items-center justify-center shrink-0 ${
+                                    isSelected
+                                      ? 'bg-gradient-to-br from-[#2F80ED] to-[#56CCF2] text-white shadow-sm'
+                                      : 'bg-gray-100 text-gray-500'
+                                  }`}
+                                >
+                                  <Icon className="w-5 h-5" />
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center justify-between mb-1">
+                                    <h3 className="text-sm font-medium text-[#333333] truncate pr-2">
+                                      {name}
+                                    </h3>
+                                    <Badge
+                                      className={`text-[10px] px-2 py-0.5 border-none shrink-0 ${oStyle.className}`}
+                                    >
+                                      {oStyle.label}
+                                    </Badge>
+                                  </div>
+                                  <p className="text-xs text-gray-500 truncate mb-1.5">
+                                    {call.patientPhone}
+                                  </p>
+                                  <div className="flex items-center gap-3 text-[11px] text-gray-400">
+                                    <span className="flex items-center gap-1">
+                                      <Clock className="w-3 h-3" />
+                                      {formatDurationSec(call.durationSec)}
+                                    </span>
+                                    <span>{formatTime(call.startedAt)}</span>
+                                    <span className="text-gray-300">|</span>
+                                    <span>
+                                      {intentLabel(call.detectedIntent)}
+                                    </span>
+                                  </div>
+                                </div>
+                                {isSelected && (
+                                  <ChevronRight className="w-4 h-4 text-[#2F80ED] shrink-0" />
+                                )}
+                              </div>
+                            </motion.div>
+                          );
+                        })}
+                      </div>
+                    </ScrollArea>
+                  )}
                 </div>
-              </ScrollArea>
-            </CardContent>
-          </Card>
-        </div>
+              </div>
+            </div>
 
+            {/* ── Call Detail ── */}
+            <div className="lg:col-span-3">
+              <AnimatePresence mode="wait">
+                {selectedCall ? (
+                  <motion.div
+                    key={selectedCall.id}
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.15 }}
+                  >
+                    <div
+                      className="bg-white rounded-xl border overflow-hidden hover:shadow-lg transition-shadow flex flex-col"
+                      style={{ height: PANEL_HEIGHT }}
+                    >
+                      <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 shrink-0">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 bg-gradient-to-br from-[#2F80ED] to-[#56CCF2] rounded-full flex items-center justify-center text-white text-sm shadow-sm">
+                            {(selectedCall.patient?.fullName ?? '?')
+                              .split(' ')
+                              .map((n) => n[0])
+                              .join('')
+                              .slice(0, 2)
+                              .toUpperCase()}
+                          </div>
+                          <div>
+                            <h3 className="text-base font-semibold leading-none">
+                              {selectedCall.patient?.fullName ??
+                                'Unknown caller'}
+                            </h3>
+                            <p className="text-xs text-gray-500 mt-1.5">
+                              {selectedCall.patientPhone}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <Badge
+                            className={`text-xs ${outcomeStyle(selectedCall.outcome).className}`}
+                          >
+                            {outcomeStyle(selectedCall.outcome).label}
+                          </Badge>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            onClick={() => setSelectedCallId(null)}
+                          >
+                            <X className="w-4 h-4" />
+                          </Button>
+                        </div>
+                      </div>
+
+                      <div className="px-6 py-3 bg-[#F7F9FB] border-b border-gray-100 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-gray-600 shrink-0">
+                        <div className="flex items-center gap-1.5">
+                          <Clock className="w-3.5 h-3.5 text-gray-400" />
+                          <span>
+                            {formatTime(selectedCall.startedAt)} –{' '}
+                            {formatTime(selectedCall.endedAt)}
+                          </span>
+                          <span className="text-gray-400">
+                            ({formatDurationSec(selectedCall.durationSec)})
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <Activity className="w-3.5 h-3.5 text-gray-400" />
+                          <span>{intentLabel(selectedCall.detectedIntent)}</span>
+                        </div>
+                        {selectedCall.sentiment && (
+                          <div className="flex items-center gap-1.5">
+                            <Badge
+                              variant="outline"
+                              className="text-[11px] px-2 py-0 h-5 border-none bg-gray-100 text-gray-700"
+                            >
+                              {selectedCall.sentiment}
+                            </Badge>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="flex-1 overflow-hidden">
+                        <ScrollArea className="h-full">
+                          {selectedTranscript.length === 0 ? (
+                            <div className="p-12 text-center text-sm text-gray-500">
+                              <FileText className="w-10 h-10 text-gray-300 mx-auto mb-3" />
+                              No transcript captured for this call yet.
+                            </div>
+                          ) : (
+                            <div className="p-6 flex flex-col gap-6">
+                              {selectedTranscript.map((segment, index) => {
+                                const isAI = segment.role === 'ai';
+                                return (
+                                  <motion.div
+                                    key={index}
+                                    initial={{ opacity: 0, y: 8 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    transition={{ delay: index * 0.025 }}
+                                    className={`flex gap-3 ${isAI ? '' : 'flex-row-reverse'}`}
+                                  >
+                                    <div
+                                      className={`shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-white ${
+                                        isAI
+                                          ? 'bg-gradient-to-br from-[#2F80ED] to-[#56CCF2]'
+                                          : 'bg-gradient-to-br from-[#27AE60] to-[#56CCF2]'
+                                      }`}
+                                    >
+                                      {isAI ? (
+                                        <Bot className="w-4 h-4" />
+                                      ) : (
+                                        <User className="w-4 h-4" />
+                                      )}
+                                    </div>
+                                    <div className="flex-1 max-w-[78%]">
+                                      <div
+                                        className={`flex items-center gap-2 mb-1 ${isAI ? '' : 'justify-end'}`}
+                                      >
+                                        <span className="text-xs font-medium text-gray-600">
+                                          {isAI
+                                            ? 'AI'
+                                            : (selectedCall.patient?.fullName ??
+                                              'Caller')}
+                                        </span>
+                                        {segment.timestamp && (
+                                          <span className="text-[11px] text-gray-400">
+                                            {segment.timestamp}
+                                          </span>
+                                        )}
+                                      </div>
+                                      <div
+                                        className={`px-4 py-3 rounded-2xl text-sm leading-relaxed ${
+                                          isAI
+                                            ? 'bg-gray-100 text-gray-700 rounded-tl-sm'
+                                            : 'bg-gradient-to-r from-[#2F80ED] to-[#56CCF2] text-white rounded-tr-sm'
+                                        }`}
+                                      >
+                                        {segment.text}
+                                      </div>
+                                    </div>
+                                  </motion.div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </ScrollArea>
+                      </div>
+                    </div>
+                  </motion.div>
+                ) : (
+                  <motion.div
+                    key="empty"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                  >
+                    <div
+                      className="bg-white rounded-xl border flex items-center justify-center hover:shadow-lg transition-shadow"
+                      style={{ height: PANEL_HEIGHT }}
+                    >
+                      <div className="text-center">
+                        <div className="w-16 h-16 bg-gradient-to-br from-[#2F80ED]/10 to-[#56CCF2]/10 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                          <PhoneCall className="w-8 h-8 text-[#2F80ED]/30" />
+                        </div>
+                        <h3 className="text-lg text-gray-600 mb-1">
+                          {calls.length === 0
+                            ? 'No calls to display'
+                            : 'Select a Call'}
+                        </h3>
+                        <p className="text-sm text-gray-400 max-w-[260px]">
+                          {calls.length === 0
+                            ? 'Once your phone is connected, calls appear here.'
+                            : 'Click on a call from the list to view the full details and transcript.'}
+                        </p>
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          </div>
+        </motion.div>
       </div>
     </div>
   );

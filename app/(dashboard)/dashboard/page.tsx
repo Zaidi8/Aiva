@@ -1,9 +1,9 @@
 'use client';
 
-import { NewDashboardPage } from '@/components/pages/NewDashboardPage';
+import { DashboardPage } from '@/components/pages/DashboardPage';
 import { useRouter } from 'next/navigation';
 
-export default function DashboardPage() {
+export default function DashboardRoute() {
   const router = useRouter();
 
   const handleNavigate = (page: string, subPage?: string) => {
@@ -14,5 +14,5 @@ export default function DashboardPage() {
     }
   };
 
-  return <NewDashboardPage onNavigate={handleNavigate} />;
+  return <DashboardPage onNavigate={handleNavigate} />;
 }

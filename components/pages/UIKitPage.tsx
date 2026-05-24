@@ -1,159 +1,333 @@
+import { toast } from 'sonner';
 import { Button } from '../ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../ui/card';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
 import { Badge } from '../ui/badge';
 import { Alert, AlertDescription } from '../ui/alert';
+import { StatsBar } from '../ui/StatsBar';
+import { TopBar } from '../ui/TopBar';
+import { CallRecord } from '../ui/CallRecord';
+import { PaginationBar } from '../ui/PaginationBar';
+import { AppointmentToast } from '../ui/AppointmentToast';
 import { 
   Calendar, 
   Users, 
   Bot, 
-  Bell, 
+  MessageSquare, 
   CheckCircle, 
   AlertCircle, 
   Info,
+  TrendingUp,
+  Clock,
   XCircle,
-  TrendingUp
+  Plus
 } from 'lucide-react';
 import { AivaLogo } from '../ui/AivaLogo';
+import { motion } from 'motion/react';
+import { useState } from 'react';
+import { useNotificationSound } from '../../hooks/useNotificationSound';
 
-export function UIKitPage() {
+interface UIKitPageProps {
+  onNavigate?: (page: string) => void;
+}
+
+export function UIKitPage({ onNavigate }: UIKitPageProps) {
+  const [currentPage, setCurrentPage] = useState(1);
+  const { playNotificationSound } = useNotificationSound();
+
+  const sampleTranscript = [
+    { id: '1', speaker: 'ai' as const, text: 'Hello! How can I help you today?', timestamp: '00:00', duration: '0:03' },
+    { id: '2', speaker: 'patient' as const, text: 'I need to book an appointment', timestamp: '00:10', duration: '0:02' },
+    { id: '3', speaker: 'ai' as const, text: 'I\'d be happy to help you schedule an appointment.', timestamp: '00:15', duration: '0:04' },
+  ];
+
+  const statsBarData = [
+    { label: 'Appointments', value: 24, icon: Calendar, color: '#2F80ED', change: '+3' },
+    { label: 'Pending', value: 7, icon: Clock, color: '#F2994A' },
+    { label: 'Cancellations', value: 3, icon: XCircle, color: '#EB5757' },
+    { label: 'Satisfaction', value: '4.6', icon: CheckCircle, color: '#27AE60' },
+  ];
+
+  const handleToastDemo = () => {
+    playNotificationSound();
+    toast.custom((t) => (
+      <AppointmentToast
+        patientName="Sarah Johnson"
+        time="2:30 PM Today"
+        doctor="Dr. Martinez"
+      />
+    ), {
+      duration: 4000,
+    });
+  };
+
   return (
-    <div className="min-h-screen bg-[#F7F9FB] p-8">
-      <div className="max-w-7xl mx-auto">
-        {/* Header */}
-        <div className="mb-12">
-          <h1 className="text-4xl text-[#333333] mb-3">UI Kit</h1>
-          <p className="text-gray-600 text-lg">Design system components and style guide for Aiva</p>
-        </div>
+    <div className="min-h-screen bg-[#F7F9FB]">
+      <TopBar 
+        title="UI Kit" 
+        description="Design system components and style guide for Aiva"
+        notificationCount={5}
+      />
 
-        {/* Brand Section */}
-        <section className="mb-16">
-          <h2 className="text-2xl text-[#333333] mb-6">Brand Identity</h2>
+      <div className="p-8 max-w-7xl mx-auto space-y-12">
+        {/* Brand Identity */}
+        <section>
+          <motion.h2 
+            initial={{ y: -10, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            className="text-2xl text-[#333333] mb-6"
+          >
+            Brand Identity
+          </motion.h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>Logo</CardTitle>
-                <CardDescription>Aiva - AI Virtual Assistant</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="flex items-center gap-6 p-6 bg-[#F7F9FB] rounded-lg">
-                  <AivaLogo className="w-20 h-20" />
-                  <div>
-                    <p className="text-2xl text-[#333333] mb-1">Aiva</p>
-                    <p className="text-sm text-gray-500">AI Virtual Assistant</p>
+            <motion.div
+              initial={{ y: 20, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              transition={{ delay: 0.1 }}
+            >
+              <Card className="hover:shadow-lg transition-shadow">
+                <CardHeader>
+                  <CardTitle>Logo</CardTitle>
+                  <CardDescription>Aiva - AI Virtual Assistant</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex items-center gap-6 p-6 bg-[#F7F9FB] rounded-lg">
+                    <motion.div
+                      animate={{ rotate: 360 }}
+                      transition={{ duration: 10, repeat: Infinity, ease: 'linear' }}
+                    >
+                      <AivaLogo className="w-20 h-20" />
+                    </motion.div>
+                    <div>
+                      <p className="text-2xl text-[#333333] mb-1">Aiva</p>
+                      <p className="text-sm text-gray-500">AI Virtual Assistant</p>
+                    </div>
                   </div>
-                </div>
-              </CardContent>
-            </Card>
+                </CardContent>
+              </Card>
+            </motion.div>
 
-            <Card>
-              <CardHeader>
-                <CardTitle>Color Palette</CardTitle>
-                <CardDescription>Primary colors used throughout the application</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <div className="h-16 bg-[#2F80ED] rounded-lg"></div>
-                    <p className="text-sm text-gray-600">Primary Blue</p>
-                    <p className="text-xs font-mono text-gray-500">#2F80ED</p>
+            <motion.div
+              initial={{ y: 20, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              transition={{ delay: 0.2 }}
+            >
+              <Card className="hover:shadow-lg transition-shadow">
+                <CardHeader>
+                  <CardTitle>Color Palette</CardTitle>
+                  <CardDescription>Primary brand colors</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-2 gap-4">
+                    {[
+                      { name: 'Primary Blue', color: '#2F80ED' },
+                      { name: 'Light Blue', color: '#56CCF2' },
+                      { name: 'Success Green', color: '#27AE60' },
+                      { name: 'Warning Orange', color: '#F2994A' },
+                      { name: 'Error Red', color: '#EB5757' },
+                      { name: 'Background', color: '#F7F9FB' },
+                    ].map((item, index) => (
+                      <motion.div 
+                        key={item.name} 
+                        className="space-y-2"
+                        whileHover={{ scale: 1.05 }}
+                        initial={{ opacity: 0, scale: 0.8 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        transition={{ delay: 0.3 + index * 0.05 }}
+                      >
+                        <div
+                          className="h-16 rounded-lg border border-gray-200 shadow-sm"
+                          style={{ backgroundColor: item.color }}
+                        />
+                        <div className="text-sm">
+                          <p className="text-gray-900">{item.name}</p>
+                          <p className="text-gray-500 text-xs">{item.color}</p>
+                        </div>
+                      </motion.div>
+                    ))}
                   </div>
-                  <div className="space-y-2">
-                    <div className="h-16 bg-[#56CCF2] rounded-lg"></div>
-                    <p className="text-sm text-gray-600">Light Blue</p>
-                    <p className="text-xs font-mono text-gray-500">#56CCF2</p>
-                  </div>
-                  <div className="space-y-2">
-                    <div className="h-16 bg-[#27AE60] rounded-lg"></div>
-                    <p className="text-sm text-gray-600">Accent Green</p>
-                    <p className="text-xs font-mono text-gray-500">#27AE60</p>
-                  </div>
-                  <div className="space-y-2">
-                    <div className="h-16 bg-[#F7F9FB] border border-gray-200 rounded-lg"></div>
-                    <p className="text-sm text-gray-600">Background</p>
-                    <p className="text-xs font-mono text-gray-500">#F7F9FB</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+                </CardContent>
+              </Card>
+            </motion.div>
           </div>
         </section>
 
-        {/* Typography Section */}
-        <section className="mb-16">
-          <h2 className="text-2xl text-[#333333] mb-6">Typography</h2>
-          <Card>
-            <CardContent className="pt-6 space-y-6">
-              <div>
-                <h1 className="text-4xl text-[#333333] mb-2">Heading 1</h1>
-                <p className="text-sm text-gray-500">text-4xl - Used for main page titles</p>
-              </div>
-              <div>
-                <h2 className="text-2xl text-[#333333] mb-2">Heading 2</h2>
-                <p className="text-sm text-gray-500">text-2xl - Used for section headings</p>
-              </div>
-              <div>
-                <h3 className="text-xl text-[#333333] mb-2">Heading 3</h3>
-                <p className="text-sm text-gray-500">text-xl - Used for card titles</p>
-              </div>
-              <div>
-                <p className="text-base text-[#333333] mb-2">Body Text - Regular</p>
-                <p className="text-sm text-gray-500">text-base - Primary body text</p>
-              </div>
-              <div>
-                <p className="text-sm text-gray-600 mb-2">Small Text - Secondary information</p>
-                <p className="text-sm text-gray-500">text-sm - Supporting text</p>
-              </div>
-            </CardContent>
-          </Card>
+        {/* Custom Components */}
+        <section>
+          <motion.h2 
+            initial={{ y: -10, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            className="text-2xl text-[#333333] mb-6"
+          >
+            Custom Components
+          </motion.h2>
+          <div className="space-y-6">
+            {/* Stats Bar */}
+            <motion.div
+              initial={{ y: 20, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              transition={{ delay: 0.1 }}
+            >
+              <Card className="hover:shadow-lg transition-shadow">
+                <CardHeader>
+                  <CardTitle>Stats Bar</CardTitle>
+                  <CardDescription>Minimalistic statistics display with hover effects</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <StatsBar stats={statsBarData} />
+                </CardContent>
+              </Card>
+            </motion.div>
+
+            {/* Call Transcript */}
+            <motion.div
+              initial={{ y: 20, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              transition={{ delay: 0.2 }}
+            >
+              <Card className="hover:shadow-lg transition-shadow">
+                <CardHeader>
+                  <CardTitle>Call Record</CardTitle>
+                  <CardDescription>AI voice call transcript with call quality and sentiment analysis</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <CallRecord
+                    transcript={sampleTranscript}
+                    patientName="John Smith"
+                    duration="2:15"
+                    callQuality={5}
+                    sentiment="positive"
+                  />
+                </CardContent>
+              </Card>
+            </motion.div>
+
+            {/* Pagination */}
+            <motion.div
+              initial={{ y: 20, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              transition={{ delay: 0.3 }}
+            >
+              <Card className="hover:shadow-lg transition-shadow">
+                <CardHeader>
+                  <CardTitle>Pagination Bar</CardTitle>
+                  <CardDescription>Full-featured pagination with page controls</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <PaginationBar
+                    currentPage={currentPage}
+                    totalPages={10}
+                    onPageChange={setCurrentPage}
+                    itemsPerPage={10}
+                    totalItems={95}
+                  />
+                </CardContent>
+              </Card>
+            </motion.div>
+
+            {/* Toast Notifications */}
+            <motion.div
+              initial={{ y: 20, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              transition={{ delay: 0.4 }}
+            >
+              <Card className="hover:shadow-lg transition-shadow">
+                <CardHeader>
+                  <CardTitle>Toast Notifications</CardTitle>
+                  <CardDescription>Real-time notifications with sound alerts</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="flex flex-wrap gap-3">
+                    <Button onClick={handleToastDemo}>
+                      <MessageSquare className="w-4 h-4 mr-2" />
+                      Appointment Toast
+                    </Button>
+                    <Button 
+                      variant="outline"
+                      onClick={() => toast.success('Action completed successfully!')}
+                    >
+                      Success Toast
+                    </Button>
+                    <Button 
+                      variant="outline"
+                      onClick={() => toast.error('An error occurred')}
+                    >
+                      Error Toast
+                    </Button>
+                    <Button 
+                      variant="outline"
+                      onClick={() => toast.info('This is an informational message')}
+                    >
+                      Info Toast
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            </motion.div>
+          </div>
         </section>
 
-        {/* Buttons Section */}
-        <section className="mb-16">
-          <h2 className="text-2xl text-[#333333] mb-6">Buttons</h2>
-          <Card>
-            <CardContent className="pt-6">
+        {/* Buttons */}
+        <section>
+          <motion.h2 
+            initial={{ y: -10, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            className="text-2xl text-[#333333] mb-6"
+          >
+            Buttons
+          </motion.h2>
+          <Card className="hover:shadow-lg transition-shadow">
+            <CardContent className="p-6">
               <div className="space-y-6">
                 <div>
-                  <p className="text-sm text-gray-600 mb-3">Primary Buttons</p>
+                  <Label className="mb-3 block">Primary Buttons</Label>
                   <div className="flex flex-wrap gap-3">
-                    <Button className="bg-[#2F80ED] hover:bg-[#2F80ED]/90">
-                      Primary Button
-                    </Button>
-                    <Button className="bg-[#2F80ED] hover:bg-[#2F80ED]/90" size="sm">
-                      Small Button
-                    </Button>
-                    <Button className="bg-[#2F80ED] hover:bg-[#2F80ED]/90" size="lg">
-                      Large Button
-                    </Button>
+                    <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                      <Button className="bg-[#2F80ED] hover:bg-[#2F80ED]/90">Primary</Button>
+                    </motion.div>
+                    <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                      <Button className="bg-gradient-to-r from-[#2F80ED] to-[#56CCF2]">Gradient</Button>
+                    </motion.div>
+                    <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                      <Button className="bg-[#27AE60] hover:bg-[#27AE60]/90">Success</Button>
+                    </motion.div>
+                    <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                      <Button variant="destructive">Destructive</Button>
+                    </motion.div>
                   </div>
                 </div>
-
                 <div>
-                  <p className="text-sm text-gray-600 mb-3">Outline Buttons</p>
+                  <Label className="mb-3 block">Secondary Buttons</Label>
                   <div className="flex flex-wrap gap-3">
-                    <Button variant="outline">Outline Button</Button>
-                    <Button variant="outline" size="sm">Small Outline</Button>
-                    <Button variant="outline" size="lg">Large Outline</Button>
+                    <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                      <Button variant="outline">Outline</Button>
+                    </motion.div>
+                    <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                      <Button variant="secondary">Secondary</Button>
+                    </motion.div>
+                    <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                      <Button variant="ghost">Ghost</Button>
+                    </motion.div>
+                    <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                      <Button variant="link">Link</Button>
+                    </motion.div>
                   </div>
                 </div>
-
                 <div>
-                  <p className="text-sm text-gray-600 mb-3">With Icons</p>
+                  <Label className="mb-3 block">Icon Buttons</Label>
                   <div className="flex flex-wrap gap-3">
-                    <Button className="bg-[#2F80ED] hover:bg-[#2F80ED]/90">
-                      <Calendar className="w-4 h-4 mr-2" />
-                      Schedule Appointment
-                    </Button>
-                    <Button variant="outline">
-                      <Users className="w-4 h-4 mr-2" />
-                      View Patients
-                    </Button>
-                    <Button className="bg-[#27AE60] hover:bg-[#27AE60]/90">
-                      <CheckCircle className="w-4 h-4 mr-2" />
-                      Confirm
-                    </Button>
+                    <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                      <Button>
+                        <Plus className="w-4 h-4 mr-2" />
+                        With Icon
+                      </Button>
+                    </motion.div>
+                    <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                      <Button variant="outline" size="icon">
+                        <MessageSquare className="w-4 h-4" />
+                      </Button>
+                    </motion.div>
                   </div>
                 </div>
               </div>
@@ -161,45 +335,33 @@ export function UIKitPage() {
           </Card>
         </section>
 
-        {/* Badges Section */}
-        <section className="mb-16">
-          <h2 className="text-2xl text-[#333333] mb-6">Badges & Status Indicators</h2>
-          <Card>
-            <CardContent className="pt-6">
+        {/* Badges */}
+        <section>
+          <motion.h2 
+            initial={{ y: -10, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            className="text-2xl text-[#333333] mb-6"
+          >
+            Badges
+          </motion.h2>
+          <Card className="hover:shadow-lg transition-shadow">
+            <CardContent className="p-6">
               <div className="space-y-4">
-                <div className="flex flex-wrap gap-3">
-                  <Badge className="bg-[#27AE60]/10 text-[#27AE60] hover:bg-[#27AE60]/20">
-                    Confirmed
-                  </Badge>
-                  <Badge className="bg-[#F2994A]/10 text-[#F2994A] hover:bg-[#F2994A]/20">
-                    Pending
-                  </Badge>
-                  <Badge className="bg-[#EB5757]/10 text-[#EB5757] hover:bg-[#EB5757]/20">
-                    Cancelled
-                  </Badge>
-                  <Badge className="bg-gray-200 text-gray-600 hover:bg-gray-300">
-                    Completed
-                  </Badge>
-                  <Badge className="bg-[#2F80ED]/10 text-[#2F80ED] hover:bg-[#2F80ED]/20">
-                    Active
-                  </Badge>
-                </div>
-
-                <div className="pt-4 border-t border-gray-200">
-                  <p className="text-sm text-gray-600 mb-3">Status with Icons</p>
+                <div>
+                  <Label className="mb-3 block">Status Badges</Label>
                   <div className="flex flex-wrap gap-3">
-                    <div className="flex items-center gap-2 px-3 py-1 bg-[#27AE60]/10 text-[#27AE60] rounded-full">
-                      <CheckCircle className="w-4 h-4" />
-                      <span className="text-sm">Online</span>
-                    </div>
-                    <div className="flex items-center gap-2 px-3 py-1 bg-[#F2994A]/10 text-[#F2994A] rounded-full">
-                      <AlertCircle className="w-4 h-4" />
-                      <span className="text-sm">Attention Required</span>
-                    </div>
-                    <div className="flex items-center gap-2 px-3 py-1 bg-[#EB5757]/10 text-[#EB5757] rounded-full">
-                      <XCircle className="w-4 h-4" />
-                      <span className="text-sm">Offline</span>
-                    </div>
+                    <Badge className="bg-[#27AE60]/10 text-[#27AE60] hover:bg-[#27AE60]/20">Confirmed</Badge>
+                    <Badge className="bg-[#F2994A]/10 text-[#F2994A] hover:bg-[#F2994A]/20">Pending</Badge>
+                    <Badge className="bg-[#2F80ED]/10 text-[#2F80ED] hover:bg-[#2F80ED]/20">Completed</Badge>
+                    <Badge className="bg-[#EB5757]/10 text-[#EB5757] hover:bg-[#EB5757]/20">Cancelled</Badge>
+                  </div>
+                </div>
+                <div>
+                  <Label className="mb-3 block">Outline Badges</Label>
+                  <div className="flex flex-wrap gap-3">
+                    <Badge variant="outline">Default</Badge>
+                    <Badge variant="outline">Secondary</Badge>
+                    <Badge variant="outline">Info</Badge>
                   </div>
                 </div>
               </div>
@@ -207,197 +369,115 @@ export function UIKitPage() {
           </Card>
         </section>
 
-        {/* Cards Section */}
-        <section className="mb-16">
-          <h2 className="text-2xl text-[#333333] mb-6">Cards & Containers</h2>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <Card className="border-l-4 border-l-[#2F80ED]">
-              <CardHeader className="pb-3">
-                <div className="flex items-center justify-between">
-                  <CardTitle className="text-base">Stat Card</CardTitle>
-                  <Calendar className="w-5 h-5 text-[#2F80ED]" />
+        {/* Forms */}
+        <section>
+          <motion.h2 
+            initial={{ y: -10, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            className="text-2xl text-[#333333] mb-6"
+          >
+            Form Elements
+          </motion.h2>
+          <Card className="hover:shadow-lg transition-shadow">
+            <CardContent className="p-6">
+              <div className="space-y-6 max-w-md">
+                <div className="space-y-2">
+                  <Label htmlFor="demo-input">Input Field</Label>
+                  <Input id="demo-input" placeholder="Enter text..." />
                 </div>
-              </CardHeader>
-              <CardContent>
-                <div className="text-3xl text-[#333333] mb-1">24</div>
-                <p className="text-sm text-gray-600">With accent border</p>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base">Regular Card</CardTitle>
-                <CardDescription>With description</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <p className="text-sm text-gray-600">Standard card layout with header and content sections</p>
-              </CardContent>
-            </Card>
-
-            <Card className="bg-gradient-to-br from-[#2F80ED] to-[#56CCF2] text-white">
-              <CardHeader className="pb-3">
-                <div className="flex items-center justify-between">
-                  <CardTitle className="text-base">Gradient Card</CardTitle>
-                  <Bot className="w-5 h-5" />
-                </div>
-              </CardHeader>
-              <CardContent>
-                <div className="text-3xl mb-1">94%</div>
-                <p className="text-sm opacity-90">Success Rate</p>
-              </CardContent>
-            </Card>
-          </div>
-        </section>
-
-        {/* Form Elements */}
-        <section className="mb-16">
-          <h2 className="text-2xl text-[#333333] mb-6">Form Elements</h2>
-          <Card>
-            <CardContent className="pt-6">
-              <div className="max-w-md space-y-4">
-                <div>
-                  <Label htmlFor="text-input">Text Input</Label>
-                  <Input 
-                    id="text-input" 
-                    type="text" 
-                    placeholder="Enter text here" 
-                    className="mt-1"
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="email-input">Email Input</Label>
-                  <Input 
-                    id="email-input" 
-                    type="email" 
-                    placeholder="email@example.com" 
-                    className="mt-1"
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="disabled-input">Disabled Input</Label>
-                  <Input 
-                    id="disabled-input" 
-                    type="text" 
-                    placeholder="Disabled" 
-                    disabled 
-                    className="mt-1"
-                  />
+                <div className="space-y-2">
+                  <Label htmlFor="demo-input-icon">Input with Icon</Label>
+                  <div className="relative">
+                    <Users className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
+                    <Input id="demo-input-icon" placeholder="Search..." className="pl-10" />
+                  </div>
                 </div>
               </div>
             </CardContent>
           </Card>
         </section>
 
-        {/* Alerts Section */}
-        <section className="mb-16">
-          <h2 className="text-2xl text-[#333333] mb-6">Alerts & Notifications</h2>
+        {/* Alerts */}
+        <section>
+          <motion.h2 
+            initial={{ y: -10, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            className="text-2xl text-[#333333] mb-6"
+          >
+            Alerts
+          </motion.h2>
           <div className="space-y-4">
-            <Alert className="border-l-4 border-l-[#27AE60] bg-[#27AE60]/5">
-              <CheckCircle className="h-4 w-4 text-[#27AE60]" />
-              <AlertDescription className="text-[#27AE60]">
-                Success! Your appointment has been scheduled successfully.
-              </AlertDescription>
-            </Alert>
-
-            <Alert className="border-l-4 border-l-[#2F80ED] bg-[#2F80ED]/5">
-              <Info className="h-4 w-4 text-[#2F80ED]" />
-              <AlertDescription className="text-[#2F80ED]">
-                Information: You have 3 pending appointments to review.
-              </AlertDescription>
-            </Alert>
-
-            <Alert className="border-l-4 border-l-[#F2994A] bg-[#F2994A]/5">
-              <AlertCircle className="h-4 w-4 text-[#F2994A]" />
-              <AlertDescription className="text-[#F2994A]">
-                Warning: Please update your AI receptionist settings.
-              </AlertDescription>
-            </Alert>
-
-            <Alert className="border-l-4 border-l-[#EB5757] bg-[#EB5757]/5">
-              <XCircle className="h-4 w-4 text-[#EB5757]" />
-              <AlertDescription className="text-[#EB5757]">
-                Error: Failed to connect to the server. Please try again.
-              </AlertDescription>
-            </Alert>
+            <motion.div
+              initial={{ x: -20, opacity: 0 }}
+              animate={{ x: 0, opacity: 1 }}
+              transition={{ delay: 0.1 }}
+            >
+              <Alert className="bg-[#2F80ED]/10 border-[#2F80ED]">
+                <Info className="w-4 h-4 text-[#2F80ED]" />
+                <AlertDescription className="text-[#2F80ED]">
+                  This is an informational alert message.
+                </AlertDescription>
+              </Alert>
+            </motion.div>
+            <motion.div
+              initial={{ x: -20, opacity: 0 }}
+              animate={{ x: 0, opacity: 1 }}
+              transition={{ delay: 0.2 }}
+            >
+              <Alert className="bg-[#27AE60]/10 border-[#27AE60]">
+                <CheckCircle className="w-4 h-4 text-[#27AE60]" />
+                <AlertDescription className="text-[#27AE60]">
+                  This is a success alert message.
+                </AlertDescription>
+              </Alert>
+            </motion.div>
+            <motion.div
+              initial={{ x: -20, opacity: 0 }}
+              animate={{ x: 0, opacity: 1 }}
+              transition={{ delay: 0.3 }}
+            >
+              <Alert className="bg-[#EB5757]/10 border-[#EB5757]">
+                <AlertCircle className="w-4 h-4 text-[#EB5757]" />
+                <AlertDescription className="text-[#EB5757]">
+                  This is an error alert message.
+                </AlertDescription>
+              </Alert>
+            </motion.div>
           </div>
         </section>
 
-        {/* Icons Section */}
-        <section className="mb-16">
-          <h2 className="text-2xl text-[#333333] mb-6">Common Icons</h2>
-          <Card>
-            <CardContent className="pt-6">
-              <div className="grid grid-cols-4 md:grid-cols-8 gap-6">
-                <div className="flex flex-col items-center gap-2">
-                  <Calendar className="w-6 h-6 text-[#2F80ED]" />
-                  <p className="text-xs text-gray-600">Calendar</p>
-                </div>
-                <div className="flex flex-col items-center gap-2">
-                  <Users className="w-6 h-6 text-[#2F80ED]" />
-                  <p className="text-xs text-gray-600">Users</p>
-                </div>
-                <div className="flex flex-col items-center gap-2">
-                  <Bot className="w-6 h-6 text-[#2F80ED]" />
-                  <p className="text-xs text-gray-600">Bot</p>
-                </div>
-                <div className="flex flex-col items-center gap-2">
-                  <Bell className="w-6 h-6 text-[#2F80ED]" />
-                  <p className="text-xs text-gray-600">Bell</p>
-                </div>
-                <div className="flex flex-col items-center gap-2">
-                  <CheckCircle className="w-6 h-6 text-[#27AE60]" />
-                  <p className="text-xs text-gray-600">Check</p>
-                </div>
-                <div className="flex flex-col items-center gap-2">
-                  <AlertCircle className="w-6 h-6 text-[#F2994A]" />
-                  <p className="text-xs text-gray-600">Alert</p>
-                </div>
-                <div className="flex flex-col items-center gap-2">
-                  <XCircle className="w-6 h-6 text-[#EB5757]" />
-                  <p className="text-xs text-gray-600">Close</p>
-                </div>
-                <div className="flex flex-col items-center gap-2">
-                  <TrendingUp className="w-6 h-6 text-[#27AE60]" />
-                  <p className="text-xs text-gray-600">Trending</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </section>
-
-        {/* Spacing Guidelines */}
-        <section className="mb-16">
-          <h2 className="text-2xl text-[#333333] mb-6">Spacing System</h2>
-          <Card>
-            <CardContent className="pt-6">
-              <div className="space-y-4">
-                <div className="flex items-center gap-4">
-                  <div className="w-20 text-sm text-gray-600">4px (1)</div>
-                  <div className="h-8 w-1 bg-[#2F80ED]"></div>
-                </div>
-                <div className="flex items-center gap-4">
-                  <div className="w-20 text-sm text-gray-600">8px (2)</div>
-                  <div className="h-8 w-2 bg-[#2F80ED]"></div>
-                </div>
-                <div className="flex items-center gap-4">
-                  <div className="w-20 text-sm text-gray-600">12px (3)</div>
-                  <div className="h-8 w-3 bg-[#2F80ED]"></div>
-                </div>
-                <div className="flex items-center gap-4">
-                  <div className="w-20 text-sm text-gray-600">16px (4)</div>
-                  <div className="h-8 w-4 bg-[#2F80ED]"></div>
-                </div>
-                <div className="flex items-center gap-4">
-                  <div className="w-20 text-sm text-gray-600">24px (6)</div>
-                  <div className="h-8 w-6 bg-[#2F80ED]"></div>
-                </div>
-                <div className="flex items-center gap-4">
-                  <div className="w-20 text-sm text-gray-600">32px (8)</div>
-                  <div className="h-8 w-8 bg-[#2F80ED]"></div>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+        {/* Cards */}
+        <section>
+          <motion.h2 
+            initial={{ y: -10, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            className="text-2xl text-[#333333] mb-6"
+          >
+            Cards
+          </motion.h2>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {[
+              { icon: Calendar, label: 'Appointments', value: '24', gradient: 'from-[#2F80ED] to-[#56CCF2]' },
+              { icon: Users, label: 'Patients', value: '156', gradient: 'from-[#56CCF2] to-[#27AE60]' },
+              { icon: Bot, label: 'AI Calls', value: '47', gradient: 'from-[#27AE60] to-[#2F80ED]' },
+            ].map((item, index) => (
+              <motion.div
+                key={item.label}
+                initial={{ y: 20, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                transition={{ delay: index * 0.1 }}
+                whileHover={{ scale: 1.05, y: -5 }}
+              >
+                <Card className={`bg-gradient-to-br ${item.gradient} text-white border-none shadow-lg`}>
+                  <CardContent className="p-6">
+                    <item.icon className="w-8 h-8 mb-4" />
+                    <p className="text-3xl mb-2">{item.value}</p>
+                    <p className="text-sm opacity-90">{item.label}</p>
+                  </CardContent>
+                </Card>
+              </motion.div>
+            ))}
+          </div>
         </section>
       </div>
     </div>

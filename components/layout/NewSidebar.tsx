@@ -44,6 +44,10 @@ interface SidebarProps {
   userProfile: SidebarUserProfile;
 }
 
+// Built once at module-load time. NODE_ENV is set at build time so this
+// flips correctly in `next build` vs `next dev`.
+const isDev = process.env.NODE_ENV !== "production";
+
 const mainMenuItems = [
   {
     id: "dashboard" as PageType,
@@ -70,7 +74,12 @@ const mainMenuItems = [
     label: "Analytics",
     icon: BarChart3,
   },
-  { id: "ui-kit" as PageType, label: "UI Kit", icon: Palette },
+  // UI Kit is a developer-facing component showcase; hide it from real users
+  // in production builds. The route itself stays — visit /ui-kit directly to
+  // reach it when needed.
+  ...(isDev
+    ? [{ id: "ui-kit" as PageType, label: "UI Kit", icon: Palette }]
+    : []),
 ];
 
 const bottomMenuItems = [

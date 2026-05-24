@@ -1,9 +1,9 @@
 'use client';
 
-import { NewAnalyticsPage } from '@/components/pages/NewAnalyticsPage';
+import { AnalyticsPage } from '@/components/pages/AnalyticsPage';
 import { useRouter } from 'next/navigation';
 
-export default function AnalyticsPage() {
+export default function AnalyticsRoute() {
   const router = useRouter();
 
   const handleNavigate = (page: string, subPage?: string) => {
@@ -14,5 +14,5 @@ export default function AnalyticsPage() {
     }
   };
 
-  return <NewAnalyticsPage onNavigate={handleNavigate} />;
+  return <AnalyticsPage onNavigate={handleNavigate} />;
 }

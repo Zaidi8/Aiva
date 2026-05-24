@@ -9,16 +9,16 @@
 //      from the client to re-invoke this server component.
 //
 // Anything interactive (search input debounce, modal toggles, form state)
-// stays inside NewPatientsPage, which is 'use client'.
+// stays inside the PatientsPage client component, which is 'use client'.
 
 import { requireStaff } from '@/lib/auth';
 import { listPatients } from '@/lib/patients/queries';
-import { NewPatientsPage } from '@/components/pages/NewPatientsPage';
+import { PatientsPage } from '@/components/pages/PatientsPage';
 
 // Next.js 15+ provides searchParams as a Promise.
 type SearchParams = Promise<{ q?: string }>;
 
-export default async function PatientsPage({
+export default async function PatientsRoute({
   searchParams,
 }: {
   searchParams: SearchParams;
@@ -32,7 +32,7 @@ export default async function PatientsPage({
   });
 
   return (
-    <NewPatientsPage
+    <PatientsPage
       initialPatients={items}
       initialTotal={total}
       initialQuery={trimmedQuery}

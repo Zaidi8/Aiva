@@ -95,7 +95,17 @@ export async function register(formData: FormData): Promise<ActionResult> {
           clinicId: clinic.id,
         },
       });
-      await tx.aiSettings.create({ data: { clinicId: clinic.id } });
+      // Seed AiSettings with a greeting personalized to the clinic. The
+      // schema default would say "Hello! Thank you for calling. How may I
+      // help you today?" with no clinic name — patients dialing the AI
+      // would have no idea which practice they reached. We can fully
+      // overwrite this from Settings → AI later.
+      await tx.aiSettings.create({
+        data: {
+          clinicId: clinic.id,
+          greetingMessage: `Hello! Thank you for calling ${clinicName}. How may I help you today?`,
+        },
+      });
     });
   } catch (e) {
     console.error("Clinic provisioning failed for user", authUserId, e);

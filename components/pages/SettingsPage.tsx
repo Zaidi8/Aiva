@@ -1,264 +1,593 @@
-import { User, Building2, Bot, Bell, Save } from 'lucide-react';
+'use client';
+
+// Settings page. Five tabs:
+//   • Profile — staff + clinic info, PATCH /api/clinic (clinic fields) only.
+//                 Staff fields (name/phone/jobTitle) are read-only for now;
+//                 there's no PATCH /api/staff/me endpoint yet, and editing
+//                 your own role/email is owned by Supabase Auth.
+//   • Notifications — UI-only toggles (no /api/staff/notification-preferences
+//                 endpoint yet); preserved as a UI shell so the IA stays stable.
+//                 Toggles persist in component state only.
+//   • Security — UI shell for password change; the Save button surfaces a
+//                 "not yet implemented" toast because Supabase Auth handles
+//                 password updates and there's no /api/auth/password endpoint.
+//   • AI Settings — live read/write against /api/ai-settings via react-hook-form.
+//   • Appearance — UI-only toggles, same rationale as Notifications.
+//
+// We use react-hook-form for the Profile and AI tabs (the two with real API
+// surface) and surface API 422 field errors via form.setError, mirroring the
+// AddPatientModal pattern.
+
+import { toast } from 'sonner';
+import { useState, useEffect } from 'react';
+import { useForm } from 'react-hook-form';
+import { useRouter } from 'next/navigation';
+import { User, Bell, Lock, Bot, Palette, Save } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../ui/card';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
 import { Switch } from '../ui/switch';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '../ui/select';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
+import { TopBar } from '../ui/TopBar';
 import { Textarea } from '../ui/textarea';
+import { motion } from 'motion/react';
+import { apiPatch, ApiError } from '@/lib/client/fetcher';
 
-export function SettingsPage() {
+interface InitialStaff {
+  fullName: string;
+  email: string;
+  role: string;
+  phone: string;
+  jobTitle: string;
+}
+interface InitialClinic {
+  name: string;
+  phone: string;
+  email: string;
+  address: string;
+  voicePhone: string;
+  timezone: string;
+}
+interface InitialAiSettings {
+  agentName: string;
+  greetingMessage: string;
+  autoBook: boolean;
+  sendConfirmations: boolean;
+  handleRescheduling: boolean;
+  emergencyTransfer: boolean;
+}
+
+interface SettingsPageProps {
+  initialTab?: string;
+  initialStaff: InitialStaff;
+  initialClinic: InitialClinic;
+  initialAiSettings: InitialAiSettings;
+}
+
+interface ProfileFormValues {
+  fullName: string; // read-only
+  email: string; // read-only
+  phone: string; // read-only (staff phone, not clinic phone)
+  clinicName: string;
+  clinicPhone: string;
+  clinicEmail: string;
+  clinicAddress: string;
+  clinicVoicePhone: string;
+}
+
+type AiFormValues = InitialAiSettings;
+
+export function SettingsPage({
+  initialTab = 'profile',
+  initialStaff,
+  initialClinic,
+  initialAiSettings,
+}: SettingsPageProps) {
+  const router = useRouter();
+  const [activeTab, setActiveTab] = useState(initialTab);
+
+  useEffect(() => {
+    setActiveTab(initialTab);
+  }, [initialTab]);
+
+  // ── Profile form (Clinic-side editable fields) ────────────────────────
+  const profileForm = useForm<ProfileFormValues>({
+    defaultValues: {
+      fullName: initialStaff.fullName,
+      email: initialStaff.email,
+      phone: initialStaff.phone,
+      clinicName: initialClinic.name,
+      clinicPhone: initialClinic.phone,
+      clinicEmail: initialClinic.email,
+      clinicAddress: initialClinic.address,
+      clinicVoicePhone: initialClinic.voicePhone,
+    },
+    mode: 'onSubmit',
+  });
+
+  const onProfileSubmit = profileForm.handleSubmit(async (values) => {
+    profileForm.clearErrors();
+    try {
+      await apiPatch('/api/clinic', {
+        name: values.clinicName.trim(),
+        phone: values.clinicPhone.trim(),
+        email: values.clinicEmail.trim(),
+        address: values.clinicAddress.trim(),
+        voicePhone: values.clinicVoicePhone.trim(),
+      });
+      toast.success('Clinic profile saved.');
+      router.refresh();
+    } catch (e) {
+      if (e instanceof ApiError && e.fields) {
+        for (const [apiKey, errs] of Object.entries(e.fields)) {
+          const formKey: keyof ProfileFormValues | null =
+            apiKey === 'name'
+              ? 'clinicName'
+              : apiKey === 'phone'
+                ? 'clinicPhone'
+                : apiKey === 'email'
+                  ? 'clinicEmail'
+                  : apiKey === 'address'
+                    ? 'clinicAddress'
+                    : apiKey === 'voicePhone'
+                      ? 'clinicVoicePhone'
+                      : null;
+          if (formKey) {
+            profileForm.setError(formKey, { message: errs[0] });
+          }
+        }
+        toast.error('Please fix the highlighted fields.');
+      } else if (e instanceof ApiError) {
+        toast.error(e.message);
+      } else {
+        toast.error('Something went wrong. Try again.');
+      }
+    }
+  });
+
+  // ── AI Settings form ───────────────────────────────────────────────────
+  const aiForm = useForm<AiFormValues>({
+    defaultValues: initialAiSettings,
+    mode: 'onSubmit',
+  });
+
+  const onAiSubmit = aiForm.handleSubmit(async (values) => {
+    aiForm.clearErrors();
+    try {
+      await apiPatch('/api/ai-settings', {
+        agentName: values.agentName.trim(),
+        greetingMessage: values.greetingMessage.trim(),
+        autoBook: values.autoBook,
+        sendConfirmations: values.sendConfirmations,
+        handleRescheduling: values.handleRescheduling,
+        emergencyTransfer: values.emergencyTransfer,
+      });
+      toast.success('AI receptionist settings saved.');
+      router.refresh();
+    } catch (e) {
+      if (e instanceof ApiError && e.fields) {
+        for (const [apiKey, errs] of Object.entries(e.fields)) {
+          if (apiKey in initialAiSettings) {
+            aiForm.setError(apiKey as keyof AiFormValues, { message: errs[0] });
+          }
+        }
+        toast.error('Please fix the highlighted fields.');
+      } else if (e instanceof ApiError) {
+        toast.error(e.message);
+      } else {
+        toast.error('Something went wrong. Try again.');
+      }
+    }
+  });
+
+  const handleNotYetImplemented = () => {
+    toast.info('This section is not connected yet.', {
+      description: 'Coming in a future update.',
+    });
+  };
+
+  const profileSubmitting = profileForm.formState.isSubmitting;
+  const aiSubmitting = aiForm.formState.isSubmitting;
+
   return (
     <div className="min-h-screen bg-[#F7F9FB]">
-      {/* Header */}
-      <div className="bg-white border-b border-gray-200 px-8 py-6">
-        <div className="max-w-5xl mx-auto">
-          <h1 className="text-3xl text-[#333333]">Settings</h1>
-          <p className="text-gray-600 mt-1">Manage your clinic and system preferences</p>
-        </div>
-      </div>
+      <TopBar
+        title="Settings"
+        description="Manage your account and application preferences"
+      />
 
-      {/* Content */}
-      <div className="p-8 max-w-5xl mx-auto space-y-8">
-        
-        {/* Profile Settings */}
-        <section>
-          <h2 className="text-2xl text-[#333333] mb-6">Profile Settings</h2>
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <User className="w-5 h-5 text-[#2F80ED]" />
-                Personal Information
-              </CardTitle>
-              <CardDescription>Update your personal and account details</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="firstName">First Name</Label>
-                  <Input id="firstName" defaultValue="John" />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="lastName">Last Name</Label>
-                  <Input id="lastName" defaultValue="Doe" />
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="email">Email</Label>
-                <Input id="email" type="email" defaultValue="john.doe@clinic.com" />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="phone">Phone Number</Label>
-                <Input id="phone" type="tel" defaultValue="555-0100" />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="role">Role</Label>
-                <Select defaultValue="admin">
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="admin">Administrator</SelectItem>
-                    <SelectItem value="doctor">Doctor</SelectItem>
-                    <SelectItem value="receptionist">Receptionist</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <Button className="bg-[#2F80ED] hover:bg-[#2F80ED]/90">
-                <Save className="w-4 h-4 mr-2" />
-                Save Changes
-              </Button>
-            </CardContent>
-          </Card>
-        </section>
+      <div className="p-8 max-w-5xl mx-auto">
+        <Tabs value={activeTab} onValueChange={setActiveTab}>
+          <TabsList className="grid w-full grid-cols-5 mb-8">
+            <TabsTrigger value="profile" className="flex items-center gap-2">
+              <User className="w-4 h-4" />
+              <span className="hidden sm:inline">Profile</span>
+            </TabsTrigger>
+            <TabsTrigger value="notifications" className="flex items-center gap-2">
+              <Bell className="w-4 h-4" />
+              <span className="hidden sm:inline">Notifications</span>
+            </TabsTrigger>
+            <TabsTrigger value="security" className="flex items-center gap-2">
+              <Lock className="w-4 h-4" />
+              <span className="hidden sm:inline">Security</span>
+            </TabsTrigger>
+            <TabsTrigger value="ai" className="flex items-center gap-2">
+              <Bot className="w-4 h-4" />
+              <span className="hidden sm:inline">AI Settings</span>
+            </TabsTrigger>
+            <TabsTrigger value="appearance" className="flex items-center gap-2">
+              <Palette className="w-4 h-4" />
+              <span className="hidden sm:inline">Appearance</span>
+            </TabsTrigger>
+          </TabsList>
 
-        {/* Clinic Settings */}
-        <section>
-          <h2 className="text-2xl text-[#333333] mb-6">Clinic Settings</h2>
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Building2 className="w-5 h-5 text-[#2F80ED]" />
-                Clinic Information
-              </CardTitle>
-              <CardDescription>Manage your clinic details and operating hours</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="space-y-2">
-                <Label htmlFor="clinicName">Clinic Name</Label>
-                <Input id="clinicName" defaultValue="City Medical Center" />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="address">Address</Label>
-                <Input id="address" defaultValue="123 Healthcare Ave, Medical District" />
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="clinicPhone">Phone</Label>
-                  <Input id="clinicPhone" type="tel" defaultValue="555-0200" />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="clinicEmail">Email</Label>
-                  <Input id="clinicEmail" type="email" defaultValue="contact@citymedical.com" />
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="hours">Operating Hours</Label>
-                <Textarea 
-                  id="hours" 
-                  defaultValue="Monday - Friday: 8:00 AM - 6:00 PM&#10;Saturday: 9:00 AM - 2:00 PM&#10;Sunday: Closed"
-                  rows={4}
-                />
-              </div>
-              <Button className="bg-[#2F80ED] hover:bg-[#2F80ED]/90">
-                <Save className="w-4 h-4 mr-2" />
-                Save Changes
-              </Button>
-            </CardContent>
-          </Card>
-        </section>
-
-        {/* AI Settings */}
-        <section>
-          <h2 className="text-2xl text-[#333333] mb-6">AI Receptionist Settings</h2>
-          <div className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Bot className="w-5 h-5 text-[#2F80ED]" />
-                  AI Configuration
-                </CardTitle>
-                <CardDescription>Customize your AI virtual assistant behavior</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-6">
-                <div className="space-y-2">
-                  <Label htmlFor="aiName">AI Assistant Name</Label>
-                  <Input id="aiName" defaultValue="Aiva" />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="greeting">Greeting Message</Label>
-                  <Textarea 
-                    id="greeting" 
-                    defaultValue="Good morning! Thank you for calling City Medical Center. How can I help you today?"
-                    rows={3}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="language">Default Language</Label>
-                  <Select defaultValue="en">
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="en">English</SelectItem>
-                      <SelectItem value="es">Spanish</SelectItem>
-                      <SelectItem value="fr">French</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <Button className="bg-[#2F80ED] hover:bg-[#2F80ED]/90">
-                  <Save className="w-4 h-4 mr-2" />
-                  Save Changes
-                </Button>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>AI Capabilities</CardTitle>
-                <CardDescription>Enable or disable AI features</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="flex items-center justify-between p-4 bg-[#F7F9FB] rounded-lg">
-                  <div>
-                    <p className="text-[#333333]">Appointment Booking</p>
-                    <p className="text-sm text-gray-600">Allow AI to schedule new appointments</p>
+          {/* ── Profile Settings ─────────────────────────────────────────── */}
+          <TabsContent value="profile">
+            <motion.div
+              initial={{ y: 20, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              className="space-y-6"
+            >
+              <Card>
+                <CardHeader>
+                  <CardTitle>Your account</CardTitle>
+                  <CardDescription>
+                    These details are tied to your login. Email is managed via your
+                    Supabase Auth account and can&apos;t be changed here.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="space-y-2">
+                      <Label htmlFor="name">Full Name</Label>
+                      <Input
+                        id="name"
+                        defaultValue={initialStaff.fullName}
+                        disabled
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="email">Email</Label>
+                      <Input
+                        id="email"
+                        type="email"
+                        defaultValue={initialStaff.email}
+                        disabled
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="phone">Phone</Label>
+                      <Input
+                        id="phone"
+                        defaultValue={initialStaff.phone || '—'}
+                        disabled
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="role">Role</Label>
+                      <Input
+                        id="role"
+                        defaultValue={initialStaff.role}
+                        disabled
+                      />
+                    </div>
                   </div>
-                  <Switch defaultChecked />
-                </div>
-                <div className="flex items-center justify-between p-4 bg-[#F7F9FB] rounded-lg">
-                  <div>
-                    <p className="text-[#333333]">Appointment Rescheduling</p>
-                    <p className="text-sm text-gray-600">Allow AI to modify existing appointments</p>
-                  </div>
-                  <Switch defaultChecked />
-                </div>
-                <div className="flex items-center justify-between p-4 bg-[#F7F9FB] rounded-lg">
-                  <div>
-                    <p className="text-[#333333]">Cancellations</p>
-                    <p className="text-sm text-gray-600">Allow AI to cancel appointments</p>
-                  </div>
-                  <Switch />
-                </div>
-                <div className="flex items-center justify-between p-4 bg-[#F7F9FB] rounded-lg">
-                  <div>
-                    <p className="text-[#333333]">Emergency Transfers</p>
-                    <p className="text-sm text-gray-600">Auto-transfer emergency calls to staff</p>
-                  </div>
-                  <Switch defaultChecked />
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-        </section>
+                </CardContent>
+              </Card>
 
-        {/* Notification Settings */}
-        <section>
-          <h2 className="text-2xl text-[#333333] mb-6">Notification Settings</h2>
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Bell className="w-5 h-5 text-[#2F80ED]" />
-                Automated Notifications
-              </CardTitle>
-              <CardDescription>Configure automatic patient reminders and alerts</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex items-center justify-between p-4 bg-[#F7F9FB] rounded-lg">
-                <div>
-                  <p className="text-[#333333]">Appointment Reminders</p>
-                  <p className="text-sm text-gray-600">Send reminders 24 hours before appointments</p>
-                </div>
-                <Switch defaultChecked />
-              </div>
-              <div className="flex items-center justify-between p-4 bg-[#F7F9FB] rounded-lg">
-                <div>
-                  <p className="text-[#333333]">Confirmation Messages</p>
-                  <p className="text-sm text-gray-600">Send confirmation after booking</p>
-                </div>
-                <Switch defaultChecked />
-              </div>
-              <div className="flex items-center justify-between p-4 bg-[#F7F9FB] rounded-lg">
-                <div>
-                  <p className="text-[#333333]">Follow-up Surveys</p>
-                  <p className="text-sm text-gray-600">Request feedback after appointments</p>
-                </div>
-                <Switch defaultChecked />
-              </div>
-              <div className="flex items-center justify-between p-4 bg-[#F7F9FB] rounded-lg">
-                <div>
-                  <p className="text-[#333333]">SMS Notifications</p>
-                  <p className="text-sm text-gray-600">Send text message reminders</p>
-                </div>
-                <Switch defaultChecked />
-              </div>
-              <div className="flex items-center justify-between p-4 bg-[#F7F9FB] rounded-lg">
-                <div>
-                  <p className="text-[#333333]">Email Notifications</p>
-                  <p className="text-sm text-gray-600">Send email reminders and updates</p>
-                </div>
-                <Switch defaultChecked />
-              </div>
-            </CardContent>
-          </Card>
-        </section>
+              <Card>
+                <CardHeader>
+                  <CardTitle>Clinic information</CardTitle>
+                  <CardDescription>
+                    Update your clinic&apos;s public contact info. The voice phone is the
+                    number patients dial to reach your AI receptionist.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <form onSubmit={onProfileSubmit} className="space-y-6" noValidate>
+                    <div className="space-y-2">
+                      <Label htmlFor="clinicName">Clinic Name</Label>
+                      <Input
+                        id="clinicName"
+                        aria-invalid={!!profileForm.formState.errors.clinicName}
+                        {...profileForm.register('clinicName')}
+                      />
+                      {profileForm.formState.errors.clinicName && (
+                        <p className="text-xs text-red-600">
+                          {profileForm.formState.errors.clinicName.message}
+                        </p>
+                      )}
+                    </div>
 
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      <div className="space-y-2">
+                        <Label htmlFor="clinicPhone">Clinic Phone</Label>
+                        <Input
+                          id="clinicPhone"
+                          aria-invalid={!!profileForm.formState.errors.clinicPhone}
+                          {...profileForm.register('clinicPhone')}
+                        />
+                        {profileForm.formState.errors.clinicPhone && (
+                          <p className="text-xs text-red-600">
+                            {profileForm.formState.errors.clinicPhone.message}
+                          </p>
+                        )}
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="clinicEmail">Clinic Email</Label>
+                        <Input
+                          id="clinicEmail"
+                          type="email"
+                          aria-invalid={!!profileForm.formState.errors.clinicEmail}
+                          {...profileForm.register('clinicEmail')}
+                        />
+                        {profileForm.formState.errors.clinicEmail && (
+                          <p className="text-xs text-red-600">
+                            {profileForm.formState.errors.clinicEmail.message}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="clinicAddress">Clinic Address</Label>
+                      <Textarea
+                        id="clinicAddress"
+                        rows={3}
+                        aria-invalid={!!profileForm.formState.errors.clinicAddress}
+                        {...profileForm.register('clinicAddress')}
+                      />
+                      {profileForm.formState.errors.clinicAddress && (
+                        <p className="text-xs text-red-600">
+                          {profileForm.formState.errors.clinicAddress.message}
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="clinicVoicePhone">Voice Phone (inbound AI number)</Label>
+                      <Input
+                        id="clinicVoicePhone"
+                        placeholder="e.g. +1 555 0100"
+                        aria-invalid={!!profileForm.formState.errors.clinicVoicePhone}
+                        {...profileForm.register('clinicVoicePhone')}
+                      />
+                      {profileForm.formState.errors.clinicVoicePhone && (
+                        <p className="text-xs text-red-600">
+                          {profileForm.formState.errors.clinicVoicePhone.message}
+                        </p>
+                      )}
+                      <p className="text-[10px] text-gray-500">
+                        Leave blank until you&apos;ve provisioned a phone number for the
+                        AI receptionist.
+                      </p>
+                    </div>
+
+                    <Button
+                      type="submit"
+                      disabled={profileSubmitting}
+                      className="bg-[#2F80ED] hover:bg-[#2F80ED]/90"
+                    >
+                      <Save className="w-4 h-4 mr-2" />
+                      {profileSubmitting ? 'Saving...' : 'Save Changes'}
+                    </Button>
+                  </form>
+                </CardContent>
+              </Card>
+            </motion.div>
+          </TabsContent>
+
+          {/* ── Notifications Settings (UI-only, no backend yet) ─────────── */}
+          <TabsContent value="notifications">
+            <motion.div
+              initial={{ y: 20, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              className="space-y-6"
+            >
+              <Card>
+                <CardHeader>
+                  <CardTitle>Notification Preferences</CardTitle>
+                  <CardDescription>
+                    Coming soon. These toggles aren&apos;t persisted yet.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                  {[
+                    { label: 'New Appointments', description: 'Get notified when new appointments are booked', defaultChecked: true },
+                    { label: 'Appointment Cancellations', description: 'Receive alerts for cancelled appointments', defaultChecked: true },
+                    { label: 'AI Call Notifications', description: 'Notifications for AI receptionist call activity', defaultChecked: true },
+                    { label: 'Daily Summary', description: 'Receive daily summary emails', defaultChecked: false },
+                    { label: 'System Updates', description: 'Get notified about system updates and maintenance', defaultChecked: true },
+                  ].map((setting, index) => (
+                    <div key={index} className="flex items-center justify-between p-4 bg-[#F7F9FB] rounded-lg">
+                      <div className="flex-1">
+                        <p className="font-medium text-[#333333]">{setting.label}</p>
+                        <p className="text-sm text-gray-600">{setting.description}</p>
+                      </div>
+                      <Switch defaultChecked={setting.defaultChecked} />
+                    </div>
+                  ))}
+                  <Button onClick={handleNotYetImplemented} className="bg-[#2F80ED] hover:bg-[#2F80ED]/90">
+                    <Save className="w-4 h-4 mr-2" />
+                    Save Preferences
+                  </Button>
+                </CardContent>
+              </Card>
+            </motion.div>
+          </TabsContent>
+
+          {/* ── Security Settings (UI-only) ──────────────────────────────── */}
+          <TabsContent value="security">
+            <motion.div
+              initial={{ y: 20, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              className="space-y-6"
+            >
+              <Card>
+                <CardHeader>
+                  <CardTitle>Change Password</CardTitle>
+                  <CardDescription>
+                    Password updates aren&apos;t wired up yet. Use Supabase Auth
+                    directly until this is connected.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="current-password">Current Password</Label>
+                    <Input id="current-password" type="password" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="new-password">New Password</Label>
+                    <Input id="new-password" type="password" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="confirm-password">Confirm New Password</Label>
+                    <Input id="confirm-password" type="password" />
+                  </div>
+                  <Button onClick={handleNotYetImplemented} className="bg-[#2F80ED] hover:bg-[#2F80ED]/90">
+                    <Save className="w-4 h-4 mr-2" />
+                    Update Password
+                  </Button>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Two-Factor Authentication</CardTitle>
+                  <CardDescription>Add an extra layer of security to your account</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="flex items-center justify-between p-4 bg-[#F7F9FB] rounded-lg">
+                    <div>
+                      <p className="font-medium text-[#333333]">Enable 2FA</p>
+                      <p className="text-sm text-gray-600">Secure your account with two-factor authentication</p>
+                    </div>
+                    <Switch />
+                  </div>
+                </CardContent>
+              </Card>
+            </motion.div>
+          </TabsContent>
+
+          {/* ── AI Settings ──────────────────────────────────────────────── */}
+          <TabsContent value="ai">
+            <motion.div
+              initial={{ y: 20, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              className="space-y-6"
+            >
+              <Card>
+                <CardHeader>
+                  <CardTitle>AI Receptionist Configuration</CardTitle>
+                  <CardDescription>
+                    Customize how the AI greets callers and which call actions it
+                    can take on its own.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <form onSubmit={onAiSubmit} className="space-y-6" noValidate>
+                    <div className="space-y-2">
+                      <Label htmlFor="ai-name">AI Assistant Name</Label>
+                      <Input
+                        id="ai-name"
+                        aria-invalid={!!aiForm.formState.errors.agentName}
+                        {...aiForm.register('agentName')}
+                      />
+                      {aiForm.formState.errors.agentName && (
+                        <p className="text-xs text-red-600">
+                          {aiForm.formState.errors.agentName.message}
+                        </p>
+                      )}
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="greeting">Greeting Message</Label>
+                      <Textarea
+                        id="greeting"
+                        rows={3}
+                        aria-invalid={!!aiForm.formState.errors.greetingMessage}
+                        {...aiForm.register('greetingMessage')}
+                      />
+                      {aiForm.formState.errors.greetingMessage && (
+                        <p className="text-xs text-red-600">
+                          {aiForm.formState.errors.greetingMessage.message}
+                        </p>
+                      )}
+                    </div>
+                    <div className="space-y-4">
+                      {[
+                        { key: 'autoBook' as const, label: 'Auto-Book Appointments', description: 'Allow AI to automatically book appointments' },
+                        { key: 'sendConfirmations' as const, label: 'Send Confirmations', description: 'Automatically send appointment confirmations' },
+                        { key: 'handleRescheduling' as const, label: 'Handle Rescheduling', description: 'Let AI manage appointment rescheduling' },
+                        { key: 'emergencyTransfer' as const, label: 'Emergency Transfers', description: 'Transfer emergency cases to staff immediately' },
+                      ].map((setting) => (
+                        <div key={setting.key} className="flex items-center justify-between p-4 bg-[#F7F9FB] rounded-lg">
+                          <div className="flex-1">
+                            <p className="font-medium text-[#333333]">{setting.label}</p>
+                            <p className="text-sm text-gray-600">{setting.description}</p>
+                          </div>
+                          <Switch
+                            checked={!!aiForm.watch(setting.key)}
+                            onCheckedChange={(checked) =>
+                              aiForm.setValue(setting.key, checked, { shouldDirty: true })
+                            }
+                          />
+                        </div>
+                      ))}
+                    </div>
+                    <Button
+                      type="submit"
+                      disabled={aiSubmitting}
+                      className="bg-[#2F80ED] hover:bg-[#2F80ED]/90"
+                    >
+                      <Save className="w-4 h-4 mr-2" />
+                      {aiSubmitting ? 'Saving...' : 'Save AI Settings'}
+                    </Button>
+                  </form>
+                </CardContent>
+              </Card>
+            </motion.div>
+          </TabsContent>
+
+          {/* ── Appearance Settings (UI-only) ────────────────────────────── */}
+          <TabsContent value="appearance">
+            <motion.div
+              initial={{ y: 20, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              className="space-y-6"
+            >
+              <Card>
+                <CardHeader>
+                  <CardTitle>Theme & Display</CardTitle>
+                  <CardDescription>
+                    Coming soon. These toggles aren&apos;t persisted yet.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                  <div className="space-y-4">
+                    {[
+                      { label: 'Dark Mode', description: 'Enable dark mode for better viewing in low light', defaultChecked: false },
+                      { label: 'Compact View', description: 'Show more information in less space', defaultChecked: false },
+                      { label: 'Animations', description: 'Enable smooth transitions and animations', defaultChecked: true },
+                    ].map((setting, index) => (
+                      <div key={index} className="flex items-center justify-between p-4 bg-[#F7F9FB] rounded-lg">
+                        <div className="flex-1">
+                          <p className="font-medium text-[#333333]">{setting.label}</p>
+                          <p className="text-sm text-gray-600">{setting.description}</p>
+                        </div>
+                        <Switch defaultChecked={setting.defaultChecked} />
+                      </div>
+                    ))}
+                  </div>
+                  <Button onClick={handleNotYetImplemented} className="bg-[#2F80ED] hover:bg-[#2F80ED]/90">
+                    <Save className="w-4 h-4 mr-2" />
+                    Save Appearance
+                  </Button>
+                </CardContent>
+              </Card>
+            </motion.div>
+          </TabsContent>
+        </Tabs>
       </div>
     </div>
   );

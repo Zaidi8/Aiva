@@ -47,5 +47,18 @@ next-env.d.ts
 # MCP server config — local-only
 .mcp.json
 
-# Audit screenshots
+# Audit screenshots and walkthrough artifacts
 /audit-*.png
+*.audit.png
+/docs/audits/
+
+# Internal planning / spec docs (kept locally)
+/docs/superpowers/
+/layout.md
+/wireframes.md
+/PROGRESS.md
+/AUDIT_*.md
+/HANDOFF_*.md
+
+# Local-only helper scripts (prefix with underscore)
+/scripts/_*
