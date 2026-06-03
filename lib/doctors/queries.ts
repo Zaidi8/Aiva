@@ -41,6 +41,18 @@ export async function listDoctors(
   return { items, total };
 }
 
+// Lightweight active-doctor list for the voice tools. Unlike listDoctors it
+// runs a SINGLE query (no parallel count) — important on the pooled DB where
+// concurrent queries under connection_limit=1 contend and intermittently fail.
+export async function listActiveDoctors(
+  staff: Pick<ClinicStaff, "clinicId">,
+): Promise<Doctor[]> {
+  return prisma.doctor.findMany({
+    where: { ...clinicWhere(staff), deactivatedAt: null },
+    orderBy: { name: "asc" },
+  });
+}
+
 export async function getDoctor(
   staff: Pick<ClinicStaff, "clinicId">,
   id: string,

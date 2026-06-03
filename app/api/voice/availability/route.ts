@@ -1,0 +1,85 @@
+// Aiva — Phase 3 voice tool: check a doctor's open slots on a date (read-only).
+//
+// Called by the Python agent's `check_availability` tool. Resolves the spoken
+// doctor name to a doctor, builds the clinic-local day bounds, and delegates
+// the slot math to the existing computeAvailability helper.
+
+import { withWebhookSecret } from "@/lib/api/with-webhook-secret";
+import { ok, fail, failValidation } from "@/lib/api/response";
+import { mapPrismaError } from "@/lib/api/prisma-errors";
+import { prisma } from "@/lib/prisma";
+import { listActiveDoctors } from "@/lib/doctors/queries";
+import { matchDoctor } from "@/lib/voice/doctor-match";
+import { computeAvailability } from "@/lib/appointments/queries";
+import { localDayBoundsUTC, utcWallClockTime } from "@/lib/voice/tz";
+import { voiceAvailabilityQuerySchema } from "@/lib/validations/voice-tools";
+
+export const runtime = "nodejs";
+
+const MAX_SLOTS = 12;
+
+export const GET = withWebhookSecret(async (req) => {
+  const { searchParams } = new URL(req.url);
+  const parsed = voiceAvailabilityQuerySchema.safeParse({
+    clinicId: searchParams.get("clinicId") ?? "",
+    doctorName: searchParams.get("doctorName") ?? "",
+    date: searchParams.get("date") ?? "",
+  });
+  if (!parsed.success) return failValidation(parsed.error);
+  const { clinicId, doctorName, date } = parsed.data;
+  const staff = { clinicId };
+
+  try {
+    // NOTE: these reads are run sequentially on purpose. The DB connection is
+    // pooled with connection_limit=1 (pgbouncer); firing them concurrently with
+    // Promise.all caused connection contention and intermittent "can't reach
+    // database server" 500s, with no speed gain (latency is geographic, not
+    // concurrency-bound). Sequential is slower-looking but reliable.
+    // findUnique by Clinic PK is safe: Clinic is the tenant root, not a
+    // clinic-owned child, so there is no cross-tenant scope to apply.
+    const clinic = await prisma.clinic.findUnique({
+      where: { id: clinicId },
+      select: { timezone: true },
+    });
+    if (!clinic) {
+      return fail("CLINIC_NOT_FOUND", `No clinic with id ${clinicId}.`, 404);
+    }
+
+    const items = await listActiveDoctors(staff);
+
+    // Tolerant match so "cardiologist" / "Dr Khan" resolve like a person would.
+    const match = matchDoctor(items, doctorName);
+    if (match.matched === "none") {
+      return ok({ resolved: false, reason: "not_found", doctorName });
+    }
+    if (match.matched === "many") {
+      return ok({
+        resolved: false,
+        reason: "ambiguous",
+        candidates: (match.candidates ?? []).map((d) => d.name),
+      });
+    }
+    const doctor = match.doctor!;
+
+    const { from, to } = localDayBoundsUTC(date);
+    const slots = await computeAvailability(staff, {
+      doctorId: doctor.id,
+      from,
+      to,
+    });
+
+    const times = slots.map((s) => utcWallClockTime(new Date(s.start)));
+    return ok({
+      resolved: true,
+      doctor: { name: doctor.name, specialization: doctor.specialization },
+      date,
+      timezone: clinic.timezone,
+      slots: times.slice(0, MAX_SLOTS),
+      totalSlots: times.length,
+    });
+  } catch (e) {
+    const mapped = mapPrismaError(e);
+    if (mapped) return mapped;
+    throw e;
+  }
+});

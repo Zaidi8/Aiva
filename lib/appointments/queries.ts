@@ -78,6 +78,33 @@ export async function getAppointment(
   });
 }
 
+// Upcoming Pending/Confirmed appointments for one or more patients, in a SINGLE
+// query. Used by the voice lookup tool. Unlike listAppointments it does no
+// parallel count() — concurrent queries contend on the connection_limit=1
+// pooler and intermittently fail. Batches all patient IDs with `in` rather than
+// looping one query per patient.
+export async function listUpcomingAppointmentsByPatients(
+  staff: Pick<ClinicStaff, "clinicId">,
+  args: { patientIds: string[]; from: Date; take?: number },
+): Promise<AppointmentWithRelations[]> {
+  if (args.patientIds.length === 0) return [];
+  const items = await prisma.appointment.findMany({
+    where: {
+      ...clinicWhere(staff),
+      patientId: { in: args.patientIds },
+      scheduledAt: { gte: args.from },
+      status: { in: ["Pending", "Confirmed"] },
+    },
+    orderBy: { scheduledAt: "asc" },
+    take: args.take ?? 5,
+    include: {
+      patient: { select: { id: true, fullName: true, phoneNumber: true } },
+      doctor: { select: { id: true, name: true, specialization: true } },
+    },
+  });
+  return items as AppointmentWithRelations[];
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // Slot availability
 //
@@ -102,6 +129,10 @@ export async function computeAvailability(
   args: { doctorId: string; from: Date; to: Date },
 ): Promise<AvailableSlot[]> {
   // 1. Verify doctor is in the calling clinic and active.
+  // NOTE: kept sequential (not Promise.all with the appointments read). With
+  // connection_limit=1 on the pooled DB, concurrent queries contend for the
+  // single connection and intermittently fail with "can't reach database
+  // server"; there is no speedup either, since the latency is geographic.
   const doctor = await prisma.doctor.findFirst({
     where: {
       id: args.doctorId,
@@ -131,6 +162,15 @@ export async function computeAvailability(
     },
     select: { scheduledAt: true, durationMin: true },
   });
+  // KNOWN LIMITATION (timezone convention mismatch — fix in Phase 4 / booking):
+  // Slots below are generated as Date.UTC(...,hh,mm) from the schedule's local
+  // "HH:mm", i.e. a 09:00 local slot becomes 09:00Z. But Appointment.scheduledAt
+  // is stored as a true instant (09:00 Karachi → 04:00Z). So a booked slot's
+  // ISO string will NOT match a generated slot's ISO string, and this
+  // subtraction can fail to remove already-booked times — i.e. a booked slot may
+  // be reported as available. Harmless for the current empty test data, but MUST
+  // be reconciled when Phase 4 starts writing/validating bookings against these
+  // slots (align both to the clinic timezone). Tracked in voice-agent Phase 4 notes.
   const takenStarts = new Set(taken.map((t) => t.scheduledAt.toISOString()));
 
   // 3. Walk day-by-day through the range generating slots.

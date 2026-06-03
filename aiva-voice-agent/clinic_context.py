@@ -22,7 +22,11 @@ import aiohttp
 
 logger = logging.getLogger("aiva.clinic_context")
 
-_FETCH_TIMEOUT_S = 2.5
+# The context endpoint does several DB round-trips; from a backend that sits far
+# from the DB region this can take a few seconds. 2.5s was too tight and caused
+# intermittent timeouts → the fallback "technical issue" greeting even when the
+# backend was healthy. 8s tolerates a slow remote pooler while still bounding it.
+_FETCH_TIMEOUT_S = 8.0
 _HEADER_SECRET = "x-webhook-secret"
 
 # (timestamp, payload) keyed by clinic_id. Phase 2 only ever stores fresh
@@ -43,7 +47,7 @@ async def fetch_clinic_context(
 ) -> dict[str, Any]:
     """One-shot HTTP GET to /api/voice/clinic-context. Raises on failure."""
     url = f"{backend_url.rstrip('/')}/api/voice/clinic-context"
-    timeout = aiohttp.ClientTimeout(total=_FETCH_TIMEOUT_S)
+    timeout = aiohttp.ClientTimeout(total=_FETCH_TIMEOUT_S, connect=3.0)
 
     async with aiohttp.ClientSession(timeout=timeout) as session:
         async with session.get(
@@ -157,20 +161,12 @@ def render_system_prompt(context: dict[str, Any]) -> str:
                      "doctor, say you don't have that information and a human "
                      "teammate will follow up.")
     else:
+        # Phase 3: only names + specializations here. Day/time availability is
+        # answered by the check_availability tool, not baked into the prompt.
         for d in doctors:
             name = d.get("name", "Unknown")
             spec = d.get("specialization")
-            header = f"- {name}" + (f" — {spec}" if spec else "")
-            lines.append(header)
-            schedule = d.get("schedule") or []
-            if schedule:
-                parts = [
-                    f"{s['dayName']} {s['startTime']}–{s['endTime']}"
-                    for s in schedule
-                ]
-                lines.append(f"  Available: {', '.join(parts)}")
-            else:
-                lines.append("  Available: not on file")
+            lines.append(f"- {name}" + (f" — {spec}" if spec else ""))
     lines.append("")
 
     lines.append("# How you speak")
@@ -185,22 +181,36 @@ def render_system_prompt(context: dict[str, Any]) -> str:
 
     lines.append("# What you can and cannot do right now")
     lines.append(
-        "- You can: answer questions about the clinic, doctors, and their "
-        "weekly availability."
+        "- You can answer questions about the clinic and its doctors. You have "
+        "tools — USE them instead of guessing:"
     )
     lines.append(
-        "- You cannot yet: book, reschedule, or cancel appointments; look up "
-        "a specific patient; transfer to a human."
+        "  - list_doctors: which doctors work here, or find a kind of doctor "
+        "(e.g. a cardiologist)."
     )
     lines.append(
-        "- If the caller asks for any of the above, say a human teammate will "
-        "follow up and offer to take a callback message."
+        "  - check_availability: a doctor's open slots on a date. Convert "
+        "phrases like 'tomorrow' to a real YYYY-MM-DD date first."
     )
-    # Conditional rules from AiSettings flags.
-    if not ai.get("autoBook", False):
-        lines.append("- Do not promise to book any appointment yourself.")
-    if not ai.get("handleRescheduling", False):
-        lines.append("- Do not promise to reschedule or cancel appointments yourself.")
+    lines.append(
+        "  - lookup_appointments: a caller's upcoming appointments. First ask "
+        "them for the phone number the appointment is under, then call it."
+    )
+    lines.append(
+        "- You cannot book, reschedule, or cancel appointments, and you cannot "
+        "transfer to a human. NEVER offer to schedule, book, or 'set up' an "
+        "appointment, and never ask 'would you like to book?' — you have no way "
+        "to do it. You may only TELL the caller which slots are open."
+    )
+    lines.append(
+        "- If the caller wants to book/change/cancel, say a human teammate will "
+        "follow up, and offer to take a callback message. Do not promise to do "
+        "it yourself."
+    )
+    # The hard no-booking rule above already covers autoBook/handleRescheduling
+    # (Phase 3 cannot write regardless of those flags), so we don't repeat them —
+    # repetition tends to confuse small models. Only the emergency rule is
+    # conditional on its flag.
     if ai.get("emergencyTransfer", False):
         lines.append(
             "- If the caller describes a medical emergency, tell them to hang up "

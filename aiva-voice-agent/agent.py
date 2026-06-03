@@ -21,7 +21,14 @@ import logging
 import os
 
 from dotenv import load_dotenv
-from livekit.agents import Agent, AgentSession, JobContext, WorkerOptions, cli
+from livekit.agents import (
+    Agent,
+    AgentSession,
+    JobContext,
+    JobProcess,
+    WorkerOptions,
+    cli,
+)
 from livekit.plugins import elevenlabs, groq, silero
 from livekit.plugins.turn_detector.english import EnglishModel
 
@@ -32,6 +39,7 @@ from clinic_context import (
     render_greeting,
     render_system_prompt,
 )
+from tools import ToolConfig, build_tools
 
 load_dotenv()
 
@@ -46,6 +54,44 @@ def _require_env(name: str) -> str:
     return value
 
 
+def prewarm(proc: JobProcess) -> None:
+    """Load the heavy VAD model ONCE per worker process, not per call.
+
+    silero.VAD.load() is slow to initialize; doing it here (before any call
+    arrives) keeps it off the call's critical path. NOTE: the EnglishModel turn
+    detector is NOT prewarmed here — it requires an active job context and
+    raises "no job context found" outside the entrypoint, so it is constructed
+    per call in entrypoint() instead.
+    """
+    proc.userdata["vad"] = silero.VAD.load()
+    logger.info("Prewarm complete: VAD loaded.")
+
+
+async def _load_context_with_retry(
+    *, backend_url: str, clinic_id: str, webhook_secret: str, attempts: int = 2
+):
+    """Fetch clinic context, retrying once before giving up.
+
+    A single transient hiccup (cold DB connection, dev server still compiling)
+    should not doom the whole call to the fallback prompt. Raises the last error
+    if every attempt fails.
+    """
+    last_exc: Exception | None = None
+    for i in range(attempts):
+        try:
+            return await get_or_fetch(
+                backend_url=backend_url,
+                clinic_id=clinic_id,
+                webhook_secret=webhook_secret,
+                max_age_s=0,
+            )
+        except Exception as exc:  # noqa: BLE001 — retry then re-raise
+            last_exc = exc
+            logger.warning("Context fetch attempt %d/%d failed: %s", i + 1, attempts, exc)
+    assert last_exc is not None
+    raise last_exc
+
+
 async def entrypoint(ctx: JobContext) -> None:
     _require_env("GROQ_API_KEY")
     _require_env("ELEVENLABS_API_KEY")
@@ -56,14 +102,13 @@ async def entrypoint(ctx: JobContext) -> None:
     logger.info("Connecting to room %s ...", ctx.room.name)
     await ctx.connect()
 
-    # Phase 2: fetch fresh per call. The cache is plumbed in get_or_fetch for
-    # a future refresh tool; max_age_s=0 means always fetch.
+    # Phase 2: fetch fresh per call (with one retry). The cache is plumbed in
+    # get_or_fetch for a future refresh tool; max_age_s=0 means always fetch.
     try:
-        context = await get_or_fetch(
+        context = await _load_context_with_retry(
             backend_url=backend_url,
             clinic_id=clinic_id,
             webhook_secret=webhook_secret,
-            max_age_s=0,
         )
         system_prompt = render_system_prompt(context)
         greeting = render_greeting(context)
@@ -74,7 +119,13 @@ async def entrypoint(ctx: JobContext) -> None:
         )
         logger.debug("Rendered system prompt (%d chars):\n%s", len(system_prompt), system_prompt)
     except Exception as exc:  # noqa: BLE001 — fail-closed, log every failure mode
-        logger.warning("Clinic context fetch failed (%s); using fallback prompt", exc)
+        logger.error(
+            "Clinic context fetch FAILED after retries (%s) — using fallback "
+            "prompt. Check that AIVA_BACKEND_URL (%s) is reachable and the "
+            "Next.js app is running.",
+            exc,
+            backend_url,
+        )
         system_prompt = FALLBACK_SYSTEM_PROMPT
         greeting = FALLBACK_GREETING
 
@@ -84,7 +135,9 @@ async def entrypoint(ctx: JobContext) -> None:
         api_key=os.environ["ELEVENLABS_API_KEY"],
         voice_id="EXAVITQu4vr4xnSDxMaL",  # "Sarah" — mature, reassuring; fits a clinic receptionist
     )
-    vad = silero.VAD.load()
+    # Reuse the VAD loaded once in prewarm(). The turn detector must be built
+    # inside the job context, so it is constructed here per call.
+    vad = ctx.proc.userdata["vad"]
     turn_detection = EnglishModel()
 
     logger.info(
@@ -101,7 +154,17 @@ async def entrypoint(ctx: JobContext) -> None:
         turn_detection=turn_detection,
     )
 
-    agent = Agent(instructions=system_prompt)
+    # Phase 3: read-only LLM tools, bound to this clinic's backend config.
+    tools = build_tools(
+        ToolConfig(
+            backend_url=backend_url,
+            clinic_id=clinic_id,
+            webhook_secret=webhook_secret,
+        )
+    )
+    logger.info("Loaded %d read-only tools: %s", len(tools), [t.info.name for t in tools])
+
+    agent = Agent(instructions=system_prompt, tools=tools)
 
     await session.start(agent=agent, room=ctx.room)
     logger.info("AgentSession started — Aiva is speaking the greeting.")
@@ -110,4 +173,10 @@ async def entrypoint(ctx: JobContext) -> None:
 
 if __name__ == "__main__":
     logger.info("Aiva voice agent worker starting — connecting to LiveKit ...")
-    cli.run_app(WorkerOptions(entrypoint_fnc=entrypoint, agent_name="aiva"))
+    cli.run_app(
+        WorkerOptions(
+            entrypoint_fnc=entrypoint,
+            prewarm_fnc=prewarm,
+            agent_name="aiva",
+        )
+    )
