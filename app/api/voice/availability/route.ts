@@ -11,7 +11,7 @@ import { prisma } from "@/lib/prisma";
 import { listActiveDoctors } from "@/lib/doctors/queries";
 import { matchDoctor } from "@/lib/voice/doctor-match";
 import { computeAvailability } from "@/lib/appointments/queries";
-import { localDayBoundsUTC, utcWallClockTime } from "@/lib/voice/tz";
+import { localDayBoundsUTC, toLocalTime, toLocalDate } from "@/lib/voice/tz";
 import { voiceAvailabilityQuerySchema } from "@/lib/validations/voice-tools";
 
 export const runtime = "nodejs";
@@ -66,9 +66,15 @@ export const GET = withWebhookSecret(async (req) => {
       doctorId: doctor.id,
       from,
       to,
+      timezone: clinic.timezone,
     });
 
-    const times = slots.map((s) => utcWallClockTime(new Date(s.start)));
+    // Slots are true instants; keep only those whose clinic-local date matches
+    // the requested day (the ±1-day padded bounds can include neighbour days),
+    // then render each as clinic-local "HH:mm" for speaking.
+    const times = slots
+      .filter((s) => toLocalDate(new Date(s.start), clinic.timezone) === date)
+      .map((s) => toLocalTime(new Date(s.start), clinic.timezone));
     return ok({
       resolved: true,
       doctor: { name: doctor.name, specialization: doctor.specialization },

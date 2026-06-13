@@ -22,6 +22,7 @@ export const GET = withApiStaff(async (req: NextRequest, _ctx, staff) => {
     doctorId: parsed.data.doctorId,
     from: new Date(parsed.data.from),
     to: new Date(parsed.data.to),
+    timezone: staff.clinic.timezone,
   });
   return ok({ slots });
 });

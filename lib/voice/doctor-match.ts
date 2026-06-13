@@ -51,6 +51,15 @@ function normalize(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
 }
 
+// Honorifics / filler that carry no identifying signal. Every doctor name starts
+// with "dr", so counting it as a name-token overlap made "Dr. <anything>" match
+// every doctor (false ambiguous). Strip these before token comparison.
+const NAME_STOPWORDS = new Set(["dr", "doctor", "the", "a", "an", "mr", "ms", "mrs"]);
+
+function meaningfulTokens(s: string): string[] {
+  return s.split(" ").filter((t) => t.length > 1 && !NAME_STOPWORDS.has(t));
+}
+
 // Score a doctor against a normalized spoken query. Higher = better; 0 = no match.
 function scoreDoctor(doctor: Doctor, query: string): number {
   const name = normalize(doctor.name);
@@ -71,8 +80,9 @@ function scoreDoctor(doctor: Doctor, query: string): number {
   if (spec.includes(query) || query.includes(spec)) return 80;
 
   // Token overlap on the name ("khan" → "dr sara khan", "sara" → same).
-  const qTokens = query.split(" ").filter((t) => t.length > 1);
-  const nameTokens = new Set(name.split(" "));
+  // Stopwords (esp. "dr") are excluded so they don't create spurious matches.
+  const qTokens = meaningfulTokens(query);
+  const nameTokens = new Set(meaningfulTokens(name));
   const overlap = qTokens.filter((t) => nameTokens.has(t)).length;
   if (overlap > 0) return 50 + overlap;
 

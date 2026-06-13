@@ -126,12 +126,16 @@ FALLBACK_GREETING = (
 )
 
 
-def render_system_prompt(context: dict[str, Any]) -> str:
+def render_system_prompt(context: dict[str, Any], today: str | None = None) -> str:
     """Turn the DTO into the multi-paragraph system prompt.
 
     Order is intentional: identity → clinic facts → doctors → speaking rules →
     capability boundaries. Rules-last is the most reliable position for
     instruction-following in small models like llama-3.1-8b.
+
+    `today` is the current date in the clinic timezone as "YYYY-MM-DD". It is
+    injected so the model can resolve relative phrases ("tomorrow", "next Monday")
+    to absolute dates itself — the tools require YYYY-MM-DD.
     """
     clinic = context["clinic"]
     ai = context["ai"]
@@ -176,41 +180,61 @@ def render_system_prompt(context: dict[str, Any]) -> str:
         "- If you don't know something, say so plainly — never invent doctors, "
         "times, or policies."
     )
-    lines.append(f"- Times you mention are in {timezone}.")
+    lines.append(f"- Times and dates you mention are in {timezone}.")
+    if today:
+        lines.append(
+            f"- Today's date is {today}. Resolve relative dates the caller says "
+            "(\"tomorrow\", \"next Monday\", \"the 14th\") to an exact YYYY-MM-DD "
+            "yourself before using a tool — the tools only accept YYYY-MM-DD."
+        )
+    lines.append(
+        "- You have tools to look things up and to book. Use them SILENTLY: never "
+        "say the word \"function\" or \"tool\", never read out a tool name or its "
+        "arguments, and never narrate that you are checking something. Just use the "
+        "tool and speak only the answer."
+    )
     lines.append("")
 
-    lines.append("# What you can and cannot do right now")
+    lines.append("# What you can do")
     lines.append(
-        "- You can answer questions about the clinic and its doctors. You have "
-        "tools — USE them instead of guessing:"
+        "- Answer questions about the clinic and its doctors, and BOOK "
+        "appointments. Use your tools instead of guessing:"
     )
     lines.append(
-        "  - list_doctors: which doctors work here, or find a kind of doctor "
-        "(e.g. a cardiologist)."
+        "  - To find doctors: look up which doctors work here, or a kind of "
+        "doctor (e.g. a cardiologist)."
     )
     lines.append(
-        "  - check_availability: a doctor's open slots on a date. Convert "
-        "phrases like 'tomorrow' to a real YYYY-MM-DD date first."
+        "  - To check open times: look up a doctor's open slots on a date. "
+        "Always do this before booking so you offer real times."
     )
     lines.append(
-        "  - lookup_appointments: a caller's upcoming appointments. First ask "
-        "them for the phone number the appointment is under, then call it."
+        "  - To find a caller's existing appointments: ask for the phone number "
+        "they're under, then look it up."
     )
     lines.append(
-        "- You cannot book, reschedule, or cancel appointments, and you cannot "
-        "transfer to a human. NEVER offer to schedule, book, or 'set up' an "
-        "appointment, and never ask 'would you like to book?' — you have no way "
-        "to do it. You may only TELL the caller which slots are open."
+        "  - To book: once the caller picks an open time, collect their phone "
+        "number and, if they're new, their full name."
+    )
+    lines.append("")
+    lines.append("# How to book (follow exactly)")
+    lines.append("1. Make sure the time is one you confirmed is open.")
+    lines.append("2. Get the caller's phone number, and their name if you don't have it.")
+    lines.append(
+        "3. Read the whole booking back — doctor, date, time, and name — and ask "
+        "the caller to confirm."
     )
     lines.append(
-        "- If the caller wants to book/change/cancel, say a human teammate will "
-        "follow up, and offer to take a callback message. Do not promise to do "
-        "it yourself."
+        "4. Only after they clearly say yes, book it. Then tell them it's booked."
     )
-    # The hard no-booking rule above already covers autoBook/handleRescheduling
-    # (Phase 3 cannot write regardless of those flags), so we don't repeat them —
-    # repetition tends to confuse small models. Only the emergency rule is
-    # conditional on its flag.
+    lines.append(
+        "- Never book without that spoken confirmation. If the time is taken or "
+        "not available, say so and offer another time."
+    )
+    lines.append(
+        "- You cannot reschedule or cancel yet, and cannot transfer to a human. "
+        "For those, say a teammate will follow up and offer a callback."
+    )
     if ai.get("emergencyTransfer", False):
         lines.append(
             "- If the caller describes a medical emergency, tell them to hang up "

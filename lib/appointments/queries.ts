@@ -8,6 +8,7 @@ import type {
 } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { clinicWhere } from "@/lib/clinic-scope";
+import { localWallClockToInstant, toLocalDate } from "@/lib/voice/tz";
 
 export interface ListAppointmentsOptions {
   from?: Date;
@@ -113,20 +114,33 @@ export async function listUpcomingAppointmentsByPatients(
 //   2. Subtracting DoctorTimeOff date ranges.
 //   3. Subtracting existing Appointment.scheduledAt values inside the range.
 //
-// All times are interpreted in the clinic's timezone but returned as ISO UTC
-// strings. We do the slot math in UTC to avoid DST edge cases inside the loop.
-// DoctorSchedule.startTime/endTime are stored as "HH:mm" — we treat them as
-// clinic-local wall-clock times.
+// Phase 4: slots are returned as TRUE instants. DoctorSchedule.startTime/endTime
+// are "HH:mm" clinic-local wall-clock; each is converted to its real UTC instant
+// in `timezone` (09:00 Asia/Karachi => T04:00:00Z), matching how stored
+// Appointment.scheduledAt works. This makes the booked-slot subtraction below and
+// the @@unique([doctorId, scheduledAt]) booking guard line up exactly. (Before
+// Phase 4 this used Date.UTC wall-clock, which didn't match stored instants.)
 // ────────────────────────────────────────────────────────────────────────────
 
 export interface AvailableSlot {
-  start: string; // ISO UTC
-  end: string; // ISO UTC
+  start: string; // ISO UTC (true instant)
+  end: string; // ISO UTC (true instant)
 }
 
 export async function computeAvailability(
   staff: Pick<ClinicStaff, "clinicId">,
-  args: { doctorId: string; from: Date; to: Date },
+  args: {
+    doctorId: string;
+    from: Date;
+    to: Date;
+    timezone: string;
+    // When true, the schedule GRID is returned without subtracting already-booked
+    // appointments — i.e. "every slot the doctor's schedule defines". Booking uses
+    // this to validate that a requested time is a real schedulable slot, then lets
+    // the DB unique constraint decide taken-vs-free (so idempotent re-books and
+    // slot-taken can be distinguished by the mutation). Default false = free slots.
+    includeTaken?: boolean;
+  },
 ): Promise<AvailableSlot[]> {
   // 1. Verify doctor is in the calling clinic and active.
   // NOTE: kept sequential (not Promise.all with the appointments read). With
@@ -152,51 +166,53 @@ export async function computeAvailability(
   });
   if (!doctor) return [];
 
-  // 2. Pull existing appointments to subtract.
-  const taken = await prisma.appointment.findMany({
-    where: {
-      doctorId: doctor.id,
-      ...clinicWhere(staff),
-      scheduledAt: { gte: args.from, lte: args.to },
-      status: { in: ["Pending", "Confirmed"] },
-    },
-    select: { scheduledAt: true, durationMin: true },
-  });
-  // KNOWN LIMITATION (timezone convention mismatch — fix in Phase 4 / booking):
-  // Slots below are generated as Date.UTC(...,hh,mm) from the schedule's local
-  // "HH:mm", i.e. a 09:00 local slot becomes 09:00Z. But Appointment.scheduledAt
-  // is stored as a true instant (09:00 Karachi → 04:00Z). So a booked slot's
-  // ISO string will NOT match a generated slot's ISO string, and this
-  // subtraction can fail to remove already-booked times — i.e. a booked slot may
-  // be reported as available. Harmless for the current empty test data, but MUST
-  // be reconciled when Phase 4 starts writing/validating bookings against these
-  // slots (align both to the clinic timezone). Tracked in voice-agent Phase 4 notes.
-  const takenStarts = new Set(taken.map((t) => t.scheduledAt.toISOString()));
+  // 2. Pull existing appointments to subtract (skipped when includeTaken).
+  let takenStarts = new Set<string>();
+  if (!args.includeTaken) {
+    const taken = await prisma.appointment.findMany({
+      where: {
+        doctorId: doctor.id,
+        ...clinicWhere(staff),
+        scheduledAt: { gte: args.from, lte: args.to },
+        status: { in: ["Pending", "Confirmed"] },
+      },
+      select: { scheduledAt: true, durationMin: true },
+    });
+    // Booked instants to subtract. Both sides are now true instants, so the ISO
+    // strings match exactly when a generated slot is already booked.
+    takenStarts = new Set(taken.map((t) => t.scheduledAt.toISOString()));
+  }
 
-  // 3. Walk day-by-day through the range generating slots.
+  // 3. Walk day-by-day. The schedule's dayOfWeek and "HH:mm" are clinic-LOCAL, so
+  // we derive each day's local calendar date (in `timezone`) and convert local
+  // wall-clock times to true instants. We iterate UTC days across the (padded)
+  // range and dedupe by local date so each local day is visited exactly once
+  // regardless of offset.
   const slots: AvailableSlot[] = [];
   const dayMs = 24 * 60 * 60 * 1000;
+  const seenLocalDates = new Set<string>();
   for (let d = startOfDayUTC(args.from); d <= args.to; d = new Date(d.getTime() + dayMs)) {
-    const dow = d.getUTCDay(); // 0..6
+    const localDate = toLocalDate(d, args.timezone); // YYYY-MM-DD in clinic tz
+    if (seenLocalDates.has(localDate)) continue;
+    seenLocalDates.add(localDate);
+
+    // dayOfWeek for the local date (parse as UTC midnight to read the weekday).
+    const [ly, lm, ld] = localDate.split("-").map(Number);
+    const dow = new Date(Date.UTC(ly, lm - 1, ld)).getUTCDay(); // 0..6
     const schedule = doctor.schedules.find((s) => s.dayOfWeek === dow);
     if (!schedule) continue;
 
-    // Skip if doctor is on time off for this date.
-    const isOff = doctor.timeOff.some(
-      (t) => d >= startOfDayUTC(t.startDate) && d <= endOfDayUTC(t.endDate),
-    );
+    // Skip if doctor is on time off for this local date (compare by local date).
+    const isOff = doctor.timeOff.some((t) => {
+      const offStart = toLocalDate(t.startDate, args.timezone);
+      const offEnd = toLocalDate(t.endDate, args.timezone);
+      return localDate >= offStart && localDate <= offEnd;
+    });
     if (isOff) continue;
 
-    const [sH, sM] = schedule.startTime.split(":").map(Number);
-    const [eH, eM] = schedule.endTime.split(":").map(Number);
     const dur = schedule.slotDurationMinutes;
-
-    const dayStart = new Date(
-      Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), sH, sM),
-    );
-    const dayEnd = new Date(
-      Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), eH, eM),
-    );
+    const dayStart = localWallClockToInstant(localDate, schedule.startTime, args.timezone);
+    const dayEnd = localWallClockToInstant(localDate, schedule.endTime, args.timezone);
 
     for (
       let t = dayStart;
@@ -217,9 +233,4 @@ export async function computeAvailability(
 
 function startOfDayUTC(d: Date): Date {
   return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
-}
-function endOfDayUTC(d: Date): Date {
-  return new Date(
-    Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 23, 59, 59, 999),
-  );
 }

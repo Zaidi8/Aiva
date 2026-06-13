@@ -35,6 +35,36 @@ export const voiceAppointmentsQuerySchema = z.object({
   phone: z.string().trim().min(3, "phone is required.").max(32),
 });
 
+// Reusable: a real calendar date in YYYY-MM-DD (rejects 2026-13-40 etc.).
+const calendarDate = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, "date must be YYYY-MM-DD.")
+  .refine((d) => {
+    const [y, m, day] = d.split("-").map(Number);
+    const dt = new Date(Date.UTC(y, m - 1, day));
+    return (
+      dt.getUTCFullYear() === y &&
+      dt.getUTCMonth() === m - 1 &&
+      dt.getUTCDate() === day
+    );
+  }, "date is not a valid calendar date.");
+
+// Phase 4 booking (write). The agent sends a resolved doctor name, an absolute
+// date + "HH:mm" time (clinic-local), the caller's phone, and — for a first-time
+// caller — their name. patientName is optional: existing callers are matched by
+// phone, and a missing name falls back to a placeholder.
+export const voiceBookBodySchema = z.object({
+  clinicId: z.string().min(1, "clinicId is required."),
+  doctorName: z.string().trim().min(1, "doctorName is required.").max(120),
+  date: calendarDate,
+  time: z
+    .string()
+    .regex(/^([01]\d|2[0-3]):[0-5]\d$/, "time must be HH:mm (24h)."),
+  phone: z.string().trim().min(3, "phone is required.").max(32),
+  patientName: z.string().trim().min(1).max(120).optional(),
+});
+
 export type VoiceDoctorsQuery = z.infer<typeof voiceDoctorsQuerySchema>;
 export type VoiceAvailabilityQuery = z.infer<typeof voiceAvailabilityQuerySchema>;
 export type VoiceAppointmentsQuery = z.infer<typeof voiceAppointmentsQuerySchema>;
+export type VoiceBookBody = z.infer<typeof voiceBookBodySchema>;

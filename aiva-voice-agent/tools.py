@@ -74,6 +74,41 @@ async def _get(config: ToolConfig, path: str, params: dict[str, str]) -> dict[st
     return data if isinstance(data, dict) else None
 
 
+async def _post(config: ToolConfig, path: str, body: dict[str, Any]) -> dict[str, Any] | None:
+    """POST {backend}/api/voice/{path} with a JSON body. Returns `data`, or None on failure.
+
+    Used by write tools (booking). Same fail-soft + timing-log contract as _get.
+    The clinicId is injected here so the LLM never has to supply it.
+    """
+    url = f"{config.backend_url.rstrip('/')}/api/voice/{path}"
+    timeout = aiohttp.ClientTimeout(total=_TIMEOUT_S, connect=3.0)
+    started = time.monotonic()
+    try:
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(
+                url,
+                json={**body, "clinicId": config.clinic_id},
+                headers={_HEADER_SECRET: config.webhook_secret},
+            ) as resp:
+                elapsed_ms = (time.monotonic() - started) * 1000
+                if resp.status != 200:
+                    text = await resp.text()
+                    logger.warning(
+                        "tool=%s method=POST status=%d elapsed_ms=%.0f body=%s",
+                        path, resp.status, elapsed_ms, text[:200],
+                    )
+                    return None
+                payload = await resp.json()
+                logger.info("tool=%s method=POST status=200 elapsed_ms=%.0f", path, elapsed_ms)
+    except Exception as exc:  # noqa: BLE001 — fail-soft, the call must continue
+        elapsed_ms = (time.monotonic() - started) * 1000
+        logger.warning("tool=%s method=POST error=%s elapsed_ms=%.0f", path, exc, elapsed_ms)
+        return None
+
+    data = payload.get("data") if isinstance(payload, dict) else None
+    return data if isinstance(data, dict) else None
+
+
 def build_tools(config: ToolConfig) -> list:
     """Return the list of LLM tools bound to this clinic's backend config."""
 
@@ -151,4 +186,57 @@ def build_tools(config: ToolConfig) -> list:
         more = " There are more beyond these." if data.get("hasMore") else ""
         return "Upcoming appointments: " + "; ".join(parts) + "." + more
 
-    return [list_doctors, check_availability, lookup_appointments]
+    @function_tool
+    async def book_appointment(
+        doctor_name: str,
+        date: str,
+        time: str,
+        phone: str,
+        patient_name: str = "",
+    ) -> str:
+        """Book an appointment for the caller. WRITES to the clinic's records.
+
+        ONLY call this AFTER you have (1) confirmed an open slot with
+        check_availability, (2) read the full booking back to the caller — doctor,
+        date, time, and name — and (3) gotten a clear spoken "yes". Do not call it
+        speculatively.
+
+        Args:
+          doctor_name: the doctor the caller chose.
+          date: absolute calendar date, YYYY-MM-DD (resolve "tomorrow" etc first).
+          time: 24-hour "HH:mm" matching one of the open slots you offered.
+          phone: the caller's phone number for the booking.
+          patient_name: the caller's full name. Required for a first-time caller;
+            pass it whenever you have it.
+        """
+        body: dict[str, Any] = {
+            "doctorName": doctor_name,
+            "date": date,
+            "time": time,
+            "phone": phone,
+        }
+        if patient_name.strip():
+            body["patientName"] = patient_name.strip()
+        data = await _post(config, "book", body)
+        if data is None:
+            return "I couldn't complete the booking right now. A teammate will follow up."
+        if data.get("booked"):
+            appt = data.get("appointment") or {}
+            who = appt.get("doctor", doctor_name)
+            when_d = appt.get("date", date)
+            when_t = appt.get("time", time)
+            if data.get("idempotent"):
+                return f"That's already booked — {who} on {when_d} at {when_t}."
+            return f"Booked. You're set with {who} on {when_d} at {when_t}."
+        reason = data.get("reason")
+        if reason == "ambiguous":
+            names = ", ".join(data.get("candidates") or [])
+            return f"There are a few matching doctors: {names}. Which one did you mean?"
+        if reason == "not_found":
+            return f"I couldn't find a doctor named {doctor_name}."
+        if reason == "slot_taken":
+            return "Sorry, that time was just taken. Would you like another time?"
+        # slot_unavailable
+        return f"{doctor_name} doesn't have {time} open on {date}. Want to pick another time?"
+
+    return [list_doctors, check_availability, lookup_appointments, book_appointment]

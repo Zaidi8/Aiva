@@ -10,6 +10,7 @@ import { mapPrismaError } from "@/lib/api/prisma-errors";
 import { prisma } from "@/lib/prisma";
 import { listUpcomingAppointmentsByPatients } from "@/lib/appointments/queries";
 import { toLocalDate, toLocalTime } from "@/lib/voice/tz";
+import { normalizePhone } from "@/lib/voice/phone";
 import { voiceAppointmentsQuerySchema } from "@/lib/validations/voice-tools";
 
 export const runtime = "nodejs";
@@ -23,7 +24,9 @@ export const GET = withWebhookSecret(async (req) => {
     phone: searchParams.get("phone") ?? "",
   });
   if (!parsed.success) return failValidation(parsed.error);
-  const { clinicId, phone } = parsed.data;
+  const { clinicId } = parsed.data;
+  // Canonicalize to match how booking stores phoneNumber (lib/voice/phone.ts).
+  const phone = normalizePhone(parsed.data.phone);
   const staff = { clinicId };
 
   try {
