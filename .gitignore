@@ -58,7 +58,10 @@ next-env.d.ts
 /wireframes.md
 /PROGRESS.md
 /AUDIT_*.md
-/HANDOFF_*.md
+/HANDOFF*.md
 
 # Local-only helper scripts (prefix with underscore)
 /scripts/_*
+
+# Local-only handoff context (kept on disk, not tracked)
+/docs/handoff/
