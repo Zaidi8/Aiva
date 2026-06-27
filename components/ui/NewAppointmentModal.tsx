@@ -23,8 +23,9 @@ import { Label } from './label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './select';
 import { Calendar } from './calendar';
 import { Popover, PopoverContent, PopoverTrigger } from './popover';
-import { CalendarIcon, Search, Check } from 'lucide-react';
+import { CalendarIcon, Search, Check, ArrowRight } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { apiGet, apiPost, ApiError } from '@/lib/client/fetcher';
@@ -89,6 +90,7 @@ export function NewAppointmentModal({
   onClose,
   onCreated,
 }: NewAppointmentModalProps) {
+  const router = useRouter();
   // ── Doctors ────────────────────────────────────────────────────────────
   const [doctors, setDoctors] = useState<ApiDoctor[]>([]);
   const [doctorsLoading, setDoctorsLoading] = useState(false);
@@ -281,9 +283,23 @@ export function NewAppointmentModal({
         </DialogHeader>
 
         {doctorEmpty && (
-          <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-700">
-            You don&apos;t have any doctors set up yet. Add one in the Doctors
-            section before booking an appointment.
+          <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-3 text-xs text-amber-800">
+            <p className="mb-2">
+              You don&apos;t have any doctors set up yet. Add a doctor and set
+              their working hours before booking an appointment.
+            </p>
+            <Button
+              type="button"
+              size="sm"
+              className="bg-amber-600 hover:bg-amber-700 text-white"
+              onClick={() => {
+                onClose();
+                router.push('/doctors');
+              }}
+            >
+              Go to Doctors
+              <ArrowRight className="w-4 h-4 ml-1" />
+            </Button>
           </div>
         )}
         {doctorsError && (

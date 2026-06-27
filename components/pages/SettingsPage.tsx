@@ -76,6 +76,12 @@ interface ProfileFormValues {
   clinicVoicePhone: string;
 }
 
+interface AccountFormValues {
+  fullName: string;
+  phone: string;
+  jobTitle: string;
+}
+
 type AiFormValues = InitialAiSettings;
 
 export function SettingsPage({
@@ -146,6 +152,48 @@ export function SettingsPage({
     }
   });
 
+  // ── Account form (the caller's OWN staff profile) ─────────────────────
+  // Separate from the clinic form: these PATCH /api/me, the clinic fields
+  // PATCH /api/clinic. Email + role are not editable here.
+  const accountForm = useForm<AccountFormValues>({
+    defaultValues: {
+      fullName: initialStaff.fullName,
+      phone: initialStaff.phone,
+      jobTitle: initialStaff.jobTitle,
+    },
+    mode: 'onSubmit',
+  });
+
+  const onAccountSubmit = accountForm.handleSubmit(async (values) => {
+    accountForm.clearErrors();
+    try {
+      await apiPatch('/api/me', {
+        fullName: values.fullName.trim(),
+        phone: values.phone.trim() || undefined,
+        jobTitle: values.jobTitle.trim() || undefined,
+      });
+      toast.success('Profile saved.');
+      router.refresh();
+    } catch (e) {
+      if (e instanceof ApiError && e.fields) {
+        for (const [apiKey, errs] of Object.entries(e.fields)) {
+          if (
+            apiKey === 'fullName' ||
+            apiKey === 'phone' ||
+            apiKey === 'jobTitle'
+          ) {
+            accountForm.setError(apiKey, { message: errs[0] });
+          }
+        }
+        toast.error('Please fix the highlighted fields.');
+      } else if (e instanceof ApiError) {
+        toast.error(e.message);
+      } else {
+        toast.error('Something went wrong. Try again.');
+      }
+    }
+  });
+
   // ── AI Settings form ───────────────────────────────────────────────────
   const aiForm = useForm<AiFormValues>({
     defaultValues: initialAiSettings,
@@ -188,6 +236,7 @@ export function SettingsPage({
   };
 
   const profileSubmitting = profileForm.formState.isSubmitting;
+  const accountSubmitting = accountForm.formState.isSubmitting;
   const aiSubmitting = aiForm.formState.isSubmitting;
 
   return (
@@ -237,42 +286,72 @@ export function SettingsPage({
                     Supabase Auth account and can&apos;t be changed here.
                   </CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-6">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div className="space-y-2">
-                      <Label htmlFor="name">Full Name</Label>
-                      <Input
-                        id="name"
-                        defaultValue={initialStaff.fullName}
-                        disabled
-                      />
+                <CardContent>
+                  <form onSubmit={onAccountSubmit} className="space-y-6" noValidate>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      <div className="space-y-2">
+                        <Label htmlFor="name">Full Name</Label>
+                        <Input
+                          id="name"
+                          aria-invalid={!!accountForm.formState.errors.fullName}
+                          {...accountForm.register('fullName')}
+                        />
+                        {accountForm.formState.errors.fullName && (
+                          <p className="text-xs text-red-600">
+                            {accountForm.formState.errors.fullName.message}
+                          </p>
+                        )}
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="email">Email</Label>
+                        <Input
+                          id="email"
+                          type="email"
+                          defaultValue={initialStaff.email}
+                          disabled
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="phone">Phone</Label>
+                        <Input
+                          id="phone"
+                          placeholder="555-0101"
+                          aria-invalid={!!accountForm.formState.errors.phone}
+                          {...accountForm.register('phone')}
+                        />
+                        {accountForm.formState.errors.phone && (
+                          <p className="text-xs text-red-600">
+                            {accountForm.formState.errors.phone.message}
+                          </p>
+                        )}
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="jobTitle">Job Title</Label>
+                        <Input
+                          id="jobTitle"
+                          placeholder="Practice Manager"
+                          {...accountForm.register('jobTitle')}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="role">Role</Label>
+                        <Input
+                          id="role"
+                          defaultValue={initialStaff.role}
+                          disabled
+                        />
+                      </div>
                     </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="email">Email</Label>
-                      <Input
-                        id="email"
-                        type="email"
-                        defaultValue={initialStaff.email}
-                        disabled
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="phone">Phone</Label>
-                      <Input
-                        id="phone"
-                        defaultValue={initialStaff.phone || '—'}
-                        disabled
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="role">Role</Label>
-                      <Input
-                        id="role"
-                        defaultValue={initialStaff.role}
-                        disabled
-                      />
-                    </div>
-                  </div>
+
+                    <Button
+                      type="submit"
+                      disabled={accountSubmitting}
+                      className="bg-[#2F80ED] hover:bg-[#2F80ED]/90"
+                    >
+                      <Save className="w-4 h-4 mr-2" />
+                      {accountSubmitting ? 'Saving...' : 'Save Account'}
+                    </Button>
+                  </form>
                 </CardContent>
               </Card>
 

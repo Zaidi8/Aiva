@@ -1,7 +1,12 @@
-// Aiva — single aggregate query that powers the dashboard stat tiles.
+// Aiva — aggregate query that powers the dashboard stat tiles.
 //
-// One round-trip via Promise.all keeps the dashboard render cheap, instead
-// of waterfall-fetching from 6 different endpoints. All counts respect the
+// The six counts are issued SEQUENTIALLY, not via Promise.all. The Supabase
+// pooler runs with connection_limit=1 (pgbouncer transaction mode); firing
+// six concurrent queries down a single connection — on top of the auth query
+// and the sibling /api/notifications + /api/appointments calls the dashboard
+// fires on mount — intermittently overruns the pooler and 500s. Serializing
+// keeps every query on the one connection in turn. Same rule the appointment
+// helpers follow (see lib/appointments/queries.ts). All counts respect the
 // caller's clinic via clinicWhere(staff).
 //
 // "Today" boundaries are computed in the caller's process timezone — which
@@ -22,6 +27,12 @@ export interface DashboardSummary {
   callsHandledToday: number;
   bookingsMadeToday: number;
   successRate: number; // 0–100, integer; 0 when no calls today
+  // Onboarding/setup signals — drive the dashboard checklist for new clinics.
+  doctorCount: number;
+  scheduledDoctorCount: number; // doctors with at least one weekly schedule row
+  patientCount: number;
+  staffCount: number; // active dashboard logins in the clinic
+  aiConfigured: boolean; // voicePhone set (the AI receptionist is reachable)
 }
 
 function startOfTodayUTC(): Date {
@@ -42,51 +53,60 @@ export async function getDashboardSummary(
   const to = endOfTodayUTC();
   const scope = clinicWhere(staff);
 
-  const [
-    todayAppointments,
-    pendingApprovals,
-    cancellationsToday,
-    callsHandledToday,
-    bookingsMadeToday,
-    callsCompletedToday,
-  ] = await Promise.all([
-    prisma.appointment.count({
-      where: { ...scope, scheduledAt: { gte: from, lte: to } },
-    }),
-    prisma.appointment.count({
-      where: { ...scope, status: "Pending" },
-    }),
-    prisma.appointment.count({
-      where: {
-        ...scope,
-        status: "Cancelled",
-        updatedAt: { gte: from, lte: to },
-      },
-    }),
-    prisma.callLog.count({
-      where: { ...scope, startedAt: { gte: from, lte: to } },
-    }),
-    prisma.callLog.count({
-      where: {
-        ...scope,
-        startedAt: { gte: from, lte: to },
-        detectedIntent: "Booking",
-        outcome: "Completed",
-      },
-    }),
-    prisma.callLog.count({
-      where: {
-        ...scope,
-        startedAt: { gte: from, lte: to },
-        outcome: "Completed",
-      },
-    }),
-  ]);
+  const todayAppointments = await prisma.appointment.count({
+    where: { ...scope, scheduledAt: { gte: from, lte: to } },
+  });
+  const pendingApprovals = await prisma.appointment.count({
+    where: { ...scope, status: "Pending" },
+  });
+  const cancellationsToday = await prisma.appointment.count({
+    where: {
+      ...scope,
+      status: "Cancelled",
+      updatedAt: { gte: from, lte: to },
+    },
+  });
+  const callsHandledToday = await prisma.callLog.count({
+    where: { ...scope, startedAt: { gte: from, lte: to } },
+  });
+  const bookingsMadeToday = await prisma.callLog.count({
+    where: {
+      ...scope,
+      startedAt: { gte: from, lte: to },
+      detectedIntent: "Booking",
+      outcome: "Completed",
+    },
+  });
+  const callsCompletedToday = await prisma.callLog.count({
+    where: {
+      ...scope,
+      startedAt: { gte: from, lte: to },
+      outcome: "Completed",
+    },
+  });
 
   const successRate =
     callsHandledToday === 0
       ? 0
       : Math.round((callsCompletedToday / callsHandledToday) * 100);
+
+  // Setup signals for the onboarding checklist. Still sequential — same
+  // connection_limit=1 rule as the counts above.
+  const doctorCount = await prisma.doctor.count({
+    where: { ...scope, deactivatedAt: null },
+  });
+  const scheduledDoctorCount = await prisma.doctor.count({
+    where: { ...scope, deactivatedAt: null, schedules: { some: {} } },
+  });
+  const patientCount = await prisma.patient.count({ where: scope });
+  const staffCount = await prisma.clinicStaff.count({
+    where: { ...scope, deactivatedAt: null },
+  });
+  const clinic = await prisma.clinic.findUnique({
+    where: { id: staff.clinicId },
+    select: { voicePhone: true },
+  });
+  const aiConfigured = !!clinic?.voicePhone;
 
   return {
     todayAppointments,
@@ -95,5 +115,10 @@ export async function getDashboardSummary(
     callsHandledToday,
     bookingsMadeToday,
     successRate,
+    doctorCount,
+    scheduledDoctorCount,
+    patientCount,
+    staffCount,
+    aiConfigured,
   };
 }

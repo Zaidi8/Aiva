@@ -27,6 +27,7 @@ import { NewAppointmentModal } from '../ui/NewAppointmentModal';
 import { motion } from 'motion/react';
 import { useNotificationSound } from '../../hooks/useNotificationSound';
 import { AppointmentToast } from '../ui/AppointmentToast';
+import { OnboardingChecklist } from '../ui/OnboardingChecklist';
 import { apiGet } from '@/lib/client/fetcher';
 
 interface DashboardPageProps {
@@ -40,6 +41,11 @@ interface DashboardSummary {
   callsHandledToday: number;
   bookingsMadeToday: number;
   successRate: number;
+  doctorCount: number;
+  scheduledDoctorCount: number;
+  patientCount: number;
+  staffCount: number;
+  aiConfigured: boolean;
 }
 
 interface ApiAppointment {
@@ -200,6 +206,18 @@ export function DashboardPage({ onNavigate }: DashboardPageProps) {
       <div className="p-6 max-w-7xl mx-auto space-y-8">
         {/* Stats Bar */}
         <StatsBar stats={stats} />
+
+        {/* Onboarding checklist — auto-hides once the clinic is fully set up. */}
+        {summary && (
+          <OnboardingChecklist
+            doctorCount={summary.doctorCount}
+            scheduledDoctorCount={summary.scheduledDoctorCount}
+            patientCount={summary.patientCount}
+            staffCount={summary.staffCount}
+            aiConfigured={summary.aiConfigured}
+            onNavigate={onNavigate}
+          />
+        )}
 
         {/* AI Status Card */}
         <motion.div

@@ -18,6 +18,8 @@ export function DashboardShell({
     if (pathname.includes('/dashboard')) return 'dashboard';
     if (pathname.includes('/appointments')) return 'appointments';
     if (pathname.includes('/patients')) return 'patients';
+    if (pathname.includes('/doctors')) return 'doctors';
+    if (pathname.includes('/team')) return 'team';
     if (pathname.includes('/ai-receptionist')) return 'ai-receptionist';
     if (pathname.includes('/analytics')) return 'analytics';
     if (pathname.includes('/settings')) return 'settings';

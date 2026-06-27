@@ -42,25 +42,28 @@ export async function listNotifications(
       : {}),
   };
 
-  const [items, total, unread] = await Promise.all([
-    prisma.notification.findMany({
-      where,
-      orderBy: { createdAt: "desc" },
-      take: opts.take ?? 20,
-      skip: opts.skip ?? 0,
-      include: {
-        patient: { select: { id: true, fullName: true } },
-        appointment: { select: { id: true, scheduledAt: true } },
-      },
-    }),
-    prisma.notification.count({ where }),
-    prisma.notification.count({
-      where: {
-        patient: { clinicId: staff.clinicId },
-        status: { in: ["Pending", "Failed"] },
-      },
-    }),
-  ]);
+  // Sequential, not Promise.all: the Supabase pooler is connection_limit=1, so
+  // firing three concurrent queries down one connection — alongside the auth
+  // query and the sibling dashboard fetches on mount — intermittently 500s.
+  // Serializing keeps each query on the single connection in turn. Same rule
+  // the appointment + dashboard helpers follow.
+  const items = await prisma.notification.findMany({
+    where,
+    orderBy: { createdAt: "desc" },
+    take: opts.take ?? 20,
+    skip: opts.skip ?? 0,
+    include: {
+      patient: { select: { id: true, fullName: true } },
+      appointment: { select: { id: true, scheduledAt: true } },
+    },
+  });
+  const total = await prisma.notification.count({ where });
+  const unread = await prisma.notification.count({
+    where: {
+      patient: { clinicId: staff.clinicId },
+      status: { in: ["Pending", "Failed"] },
+    },
+  });
 
   return { items, total, unread };
 }

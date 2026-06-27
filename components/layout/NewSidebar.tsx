@@ -3,6 +3,8 @@ import {
   LayoutDashboard,
   Calendar,
   Users,
+  UsersRound,
+  Stethoscope,
   Phone,
   BarChart3,
   Settings,
@@ -63,6 +65,16 @@ const mainMenuItems = [
     id: "patients" as PageType,
     label: "Patient Records",
     icon: Users,
+  },
+  {
+    id: "doctors" as PageType,
+    label: "Doctors",
+    icon: Stethoscope,
+  },
+  {
+    id: "team" as PageType,
+    label: "Team",
+    icon: UsersRound,
   },
   {
     id: "ai-receptionist" as PageType,

@@ -7,6 +7,8 @@ export type PageType =
   | 'dashboard'
   | 'appointments'
   | 'patients'
+  | 'doctors'
+  | 'team'
   | 'ai-receptionist'
   | 'analytics'
   | 'settings'

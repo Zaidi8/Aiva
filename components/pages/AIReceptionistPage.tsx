@@ -331,11 +331,21 @@ export function AIReceptionistPage({
                             ? '0 calls yet'
                             : 'No Calls Match Filter'}
                         </h3>
-                        <p className="text-sm text-gray-500">
+                        <p className="text-sm text-gray-500 mb-4">
                           {calls.length === 0
-                            ? 'Once your phone is connected, calls appear here.'
+                            ? 'Connect your AI phone number and customize the greeting to start taking calls.'
                             : 'Try adjusting your search or filters.'}
                         </p>
+                        {calls.length === 0 && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="hover:bg-[#2F80ED] hover:text-white transition-all"
+                            onClick={() => router.push('/settings?tab=ai')}
+                          >
+                            Configure AI Receptionist
+                          </Button>
+                        )}
                       </div>
                     </div>
                   ) : (
