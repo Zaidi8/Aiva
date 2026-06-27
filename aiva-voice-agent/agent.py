@@ -237,10 +237,15 @@ async def entrypoint(ctx: JobContext) -> None:
     # already scrubs its tool-call-text leaks); override via AIVA_FALLBACK_MODEL.
     # If BOTH are exhausted, the APIError reaches AivaAgent.llm_node, which speaks
     # the graceful fallback line instead of going silent (Phase 7).
+    # Both models are env-overridable so a drained per-model Groq budget can be
+    # sidestepped for testing WITHOUT a code change — e.g. set
+    # AIVA_PRIMARY_MODEL=openai/gpt-oss-20b (its own fresh token bucket) and
+    # restart the worker. Defaults are the tuned production pair.
+    primary_model = os.environ.get("AIVA_PRIMARY_MODEL", "llama-3.3-70b-versatile")
     fallback_model = os.environ.get("AIVA_FALLBACK_MODEL", "llama-3.1-8b-instant")
     llm = FallbackAdapter(
         [
-            groq.LLM(model="llama-3.3-70b-versatile", temperature=0.3),
+            groq.LLM(model=primary_model, temperature=0.3),
             groq.LLM(model=fallback_model, temperature=0.3),
         ]
     )
@@ -255,8 +260,9 @@ async def entrypoint(ctx: JobContext) -> None:
 
     logger.info(
         "Providers loaded | STT=Groq(whisper-large-v3-turbo) "
-        "LLM=Groq(llama-3.3-70b-versatile -> %s fallback) TTS=ElevenLabs(Sarah) "
+        "LLM=Groq(%s -> %s fallback) TTS=ElevenLabs(Sarah) "
         "VAD=Silero TurnDetector=LiveKit(english)",
+        primary_model,
         fallback_model,
     )
 
