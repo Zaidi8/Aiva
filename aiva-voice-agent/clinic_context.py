@@ -198,29 +198,10 @@ def render_system_prompt(context: dict[str, Any], today: str | None = None) -> s
     lines.append("# What you can do")
     lines.append(
         "- Answer questions about the clinic and its doctors, and BOOK, RESCHEDULE, "
-        "and CANCEL appointments. Use your tools instead of guessing:"
-    )
-    lines.append(
-        "  - To find doctors: look up which doctors work here, or a kind of "
-        "doctor (e.g. a cardiologist)."
-    )
-    lines.append(
-        "  - To check open times: look up a doctor's open slots on a date. "
-        "Always do this before booking so you offer real times. When the caller "
-        "names a time, check THAT time specifically — don't read out the whole "
-        "day's list of slots."
-    )
-    lines.append(
-        "  - To find a caller's existing appointments: ask for the phone number "
-        "they're under, then look it up."
-    )
-    lines.append(
-        "  - To book: once the caller picks an open time, collect their phone "
-        "number and, if they're new, their full name."
-    )
-    lines.append(
-        "  - To cancel or reschedule: find the caller's appointment first (by "
-        "phone), then cancel it or move it to a new time."
+        "and CANCEL appointments. Always use your tools (described with each) rather "
+        "than guessing. Check open times before booking, and to cancel or move an "
+        "appointment look it up by phone first. When the caller names a specific "
+        "time, check THAT time — don't read out the whole day's slots."
     )
     lines.append("")
     lines.append("# How to book (follow exactly)")

@@ -129,12 +129,8 @@ def build_tools(config: ToolConfig) -> list:
 
     @function_tool
     async def list_doctors(query: str = "") -> str:
-        """List the clinic's doctors, optionally filtered by name or specialization.
-
-        Use this when the caller asks which doctors are available, or asks for a
-        specific kind of doctor (e.g. "do you have a cardiologist?"). Pass the
-        caller's search term as `query`, or leave it empty to list everyone.
-        """
+        """List the clinic's doctors. Pass the caller's search term as `query`
+        (a name or kind, e.g. "cardiologist"), or leave empty to list everyone."""
         params = {"q": query} if query.strip() else {}
         data = await _get(config, "doctors", params)
         if data is None:
@@ -155,20 +151,10 @@ def build_tools(config: ToolConfig) -> list:
     async def check_availability(
         context: RunContext, doctor_name: str, date: str, time: str = ""
     ) -> str:
-        """Check a doctor's open appointment slots on a specific date.
-
-        `doctor_name` is the doctor the caller named. `date` MUST be an absolute
-        calendar date in YYYY-MM-DD format — resolve relative phrases like
-        "tomorrow" or "next Monday" to a real date before calling.
-
-        If the caller named a specific time, ALWAYS pass it as `time` in 24-hour
-        "HH:mm" (e.g. "16:30" for 4:30pm). When you do, this reports whether THAT
-        exact time is open plus the nearest alternatives — so you can offer the
-        time they actually asked for instead of listing the whole day. Leave
-        `time` empty only if the caller hasn't named a time yet.
-
-        Read-only — you cannot book here, only report availability.
-        """
+        """Check a doctor's open slots. `date` is YYYY-MM-DD. If the caller named a
+        time, pass it as `time` ("HH:mm", 24h, e.g. "16:30") to get whether that
+        exact time is open plus the nearest alternatives; leave `time` empty if they
+        haven't named one. Read-only."""
         _say_filler(context, "Let me check that for you.")
         params = {"doctorName": doctor_name, "date": date}
         if time.strip():
@@ -214,13 +200,9 @@ def build_tools(config: ToolConfig) -> list:
 
     @function_tool
     async def lookup_appointments(context: RunContext, phone: str) -> str:
-        """Look up the caller's upcoming appointments by the phone number they give.
-
-        Ask the caller for the phone number their appointment is under, then pass
-        it as `phone`. Returns their upcoming appointments. Use this FIRST when a
-        caller wants to cancel or move an appointment, so you know the exact
-        doctor, date, and time to pass to cancel_appointment / reschedule_appointment.
-        """
+        """Find the caller's upcoming appointments by their `phone`. Use this FIRST
+        when they want to cancel or move one, so you have the exact doctor, date,
+        and time to pass on. Read-only."""
         _say_filler(context, "Let me pull that up.")
         data = await _get(config, "appointments", {"phone": phone})
         if data is None:
@@ -246,21 +228,10 @@ def build_tools(config: ToolConfig) -> list:
         phone: str,
         patient_name: str = "",
     ) -> str:
-        """Book an appointment for the caller. WRITES to the clinic's records.
-
-        ONLY call this AFTER you have (1) confirmed an open slot with
-        check_availability, (2) read the full booking back to the caller — doctor,
-        date, time, and name — and (3) gotten a clear spoken "yes". Do not call it
-        speculatively.
-
-        Args:
-          doctor_name: the doctor the caller chose.
-          date: absolute calendar date, YYYY-MM-DD (resolve "tomorrow" etc first).
-          time: 24-hour "HH:mm" matching one of the open slots you offered.
-          phone: the caller's phone number for the booking.
-          patient_name: the caller's full name. Required for a first-time caller;
-            pass it whenever you have it.
-        """
+        """Book an appointment. WRITES. Call only after the slot is confirmed open
+        and the caller said yes to a read-back. `date` YYYY-MM-DD, `time` "HH:mm"
+        matching an open slot, `phone` the caller's number, `patient_name` their
+        full name (needed for a first-time caller)."""
         _say_filler(context, "Okay, booking that now.")
         body: dict[str, Any] = {
             "doctorName": doctor_name,
@@ -300,18 +271,10 @@ def build_tools(config: ToolConfig) -> list:
         time: str,
         phone: str,
     ) -> str:
-        """Cancel one of the caller's existing appointments. WRITES to records.
-
-        ONLY call this AFTER you have (1) looked the appointment up with
-        lookup_appointments, (2) read it back to the caller — doctor, date, time —
-        and (3) gotten a clear spoken "yes" to cancel it.
-
-        Args:
-          doctor_name: the doctor on the appointment being cancelled.
-          date: that appointment's date, YYYY-MM-DD.
-          time: that appointment's time, 24-hour "HH:mm".
-          phone: the phone number the appointment is under.
-        """
+        """Cancel one of the caller's appointments. WRITES. Call only after you
+        looked it up, read it back, and the caller said yes. `date`/`time` are that
+        appointment's date (YYYY-MM-DD) and time ("HH:mm"); `phone` the number it's
+        under."""
         _say_filler(context, "Okay, let me cancel that.")
         data = await _post(
             config,
@@ -347,21 +310,11 @@ def build_tools(config: ToolConfig) -> list:
         new_time: str,
         phone: str,
     ) -> str:
-        """Move one of the caller's appointments to a new time. WRITES to records.
-
-        The doctor stays the same. ONLY call this AFTER you have (1) looked the
-        appointment up with lookup_appointments, (2) confirmed the NEW time is open
-        with check_availability, (3) read the move back to the caller — from the old
-        date/time to the new date/time — and (4) gotten a clear spoken "yes".
-
-        Args:
-          doctor_name: the doctor on the appointment (unchanged by the move).
-          date: the appointment's CURRENT date, YYYY-MM-DD.
-          time: the appointment's CURRENT time, 24-hour "HH:mm".
-          new_date: the NEW date to move it to, YYYY-MM-DD.
-          new_time: the NEW time to move it to, 24-hour "HH:mm".
-          phone: the phone number the appointment is under.
-        """
+        """Move one of the caller's appointments to a new time (same doctor).
+        WRITES. Call only after you looked it up, confirmed the NEW time is open,
+        read the move back, and the caller said yes. `date`/`time` are the CURRENT
+        date (YYYY-MM-DD) and time ("HH:mm"); `new_date`/`new_time` the new ones;
+        `phone` the number it's under."""
         _say_filler(context, "Okay, let me move that for you.")
         data = await _post(
             config,

@@ -29,12 +29,14 @@ from livekit import rtc
 from livekit.agents import (
     Agent,
     AgentSession,
+    APIError,
     JobContext,
     JobProcess,
     ModelSettings,
     WorkerOptions,
     cli,
 )
+from livekit.agents.llm import ChatChunk, ChatContext
 from livekit.plugins import elevenlabs, groq, silero
 from livekit.plugins.turn_detector.english import EnglishModel
 
@@ -63,6 +65,14 @@ logging.basicConfig(
 logger = logging.getLogger("aiva.agent")
 logger.info("Logging to console + %s", _LOG_FILE)
 
+# Spoken when an LLM completion can't be produced for a turn (rate limit /
+# connection / timeout, after the framework's own retries). Better than the dead
+# air the caller hears today — it invites a retry, by which point a per-minute
+# token budget has typically refilled. See AivaAgent.llm_node.
+LLM_FAILURE_REPLY = (
+    "Sorry, I'm having a little trouble on my end. Could you say that one more time?"
+)
+
 
 class AivaAgent(Agent):
     """Clinic receptionist agent with a sanitized TTS path (Phase 5 bug #1).
@@ -80,6 +90,34 @@ class AivaAgent(Agent):
             self, sanitize_for_speech(text), model_settings
         ):
             yield frame
+
+    async def llm_node(
+        self,
+        chat_ctx: ChatContext,
+        tools: list,
+        model_settings: ModelSettings,
+    ) -> AsyncIterable[ChatChunk | str]:
+        """Speak a graceful apology instead of going silent when the LLM fails
+        (Phase 7 reliability). The framework already retries 4× before raising; by
+        the time an APIError reaches here (rate limit / connection / timeout), the
+        completion is unrecoverable for this turn. Rather than dead air — what the
+        caller heard on a Groq 429 — we yield a short spoken line that invites them
+        to try again (by which point the per-minute token budget has refilled)."""
+        produced = False
+        try:
+            async for chunk in Agent.default.llm_node(
+                self, chat_ctx, tools, model_settings
+            ):
+                produced = True
+                yield chunk
+        except APIError as exc:
+            logger.warning(
+                "LLM completion failed (%s) — speaking fallback line.", exc
+            )
+            # Only apologize if nothing was spoken yet, so we don't tack the
+            # apology onto a partially-delivered reply.
+            if not produced:
+                yield LLM_FAILURE_REPLY
 
 
 def _require_env(name: str) -> str:
@@ -207,6 +245,14 @@ async def entrypoint(ctx: JobContext) -> None:
         # the min delay still guards against cutting the caller off mid-sentence.
         min_endpointing_delay=0.4,
         max_endpointing_delay=3.0,
+        # Phase 7: disable preemptive generation. It speculatively generates a
+        # reply before the caller's turn ends to shave latency, but on a
+        # tool-using agent the context/tools change mid-turn, so the speculative
+        # generation is thrown away and re-run — the log showed exactly this
+        # ("preemptive generation … tools have changed"). On Groq's tight
+        # per-minute token budget that wasted generation is what tips a tool turn
+        # over the 12k/min limit into a 429. Off = one generation per turn.
+        preemptive_generation=False,
     )
 
     # Phase 3: read-only LLM tools, bound to this clinic's backend config.
