@@ -36,7 +36,7 @@ from livekit.agents import (
     WorkerOptions,
     cli,
 )
-from livekit.agents.llm import ChatChunk, ChatContext
+from livekit.agents.llm import ChatChunk, ChatContext, FallbackAdapter
 from livekit.plugins import elevenlabs, groq, silero
 from livekit.plugins.turn_detector.english import EnglishModel
 
@@ -72,6 +72,11 @@ logger.info("Logging to console + %s", _LOG_FILE)
 LLM_FAILURE_REPLY = (
     "Sorry, I'm having a little trouble on my end. Could you say that one more time?"
 )
+
+# Phase 8: how long a fetched clinic context stays usable from the per-worker
+# cache before the next call re-fetches. Clinic facts change rarely; this trades a
+# little staleness for skipping the Mumbai DB round-trip on every call's greeting.
+CONTEXT_CACHE_TTL_S = 600.0
 
 
 class AivaAgent(Agent):
@@ -156,7 +161,12 @@ async def _load_context_with_retry(
                 backend_url=backend_url,
                 clinic_id=clinic_id,
                 webhook_secret=webhook_secret,
-                max_age_s=0,
+                # Phase 8: cache the clinic context per worker for CONTEXT_CACHE_TTL_S.
+                # The fetch is a ~1.5-4s round-trip to the Mumbai DB on EVERY call's
+                # critical path (before the greeting); clinic facts (name, doctors,
+                # hours) change rarely, so serving consecutive calls from cache cuts
+                # that latency and also rides out a transient DB blip between calls.
+                max_age_s=CONTEXT_CACHE_TTL_S,
             )
         except Exception as exc:  # noqa: BLE001 — retry then re-raise
             last_exc = exc
@@ -175,8 +185,9 @@ async def entrypoint(ctx: JobContext) -> None:
     logger.info("Connecting to room %s ...", ctx.room.name)
     await ctx.connect()
 
-    # Phase 2: fetch fresh per call (with one retry). The cache is plumbed in
-    # get_or_fetch for a future refresh tool; max_age_s=0 means always fetch.
+    # Fetch the clinic context (with one retry), served from the per-worker cache
+    # when fresh (Phase 8, CONTEXT_CACHE_TTL_S) to keep the Mumbai round-trip off
+    # most calls' critical path.
     try:
         context = await _load_context_with_retry(
             backend_url=backend_url,
@@ -217,7 +228,22 @@ async def entrypoint(ctx: JobContext) -> None:
     # without producing an answer ("said 'function' and never responded"). The
     # 70b model emits proper tool calls and follows the booking protocol better.
     # temperature kept low for instruction-following on a phone call.
-    llm = groq.LLM(model="llama-3.3-70b-versatile", temperature=0.3)
+    #
+    # Phase 8: wrap the primary in a FallbackAdapter with a SECOND model. Groq's
+    # free-tier rate limits are PER MODEL, so when 70b returns a 429 (which kept
+    # killing test calls) the adapter fails over mid-turn to the backup model's
+    # own token bucket and the caller still gets an answer. The backup defaults to
+    # llama-3.1-8b-instant (same family, low latency, and our tts_node sanitizer
+    # already scrubs its tool-call-text leaks); override via AIVA_FALLBACK_MODEL.
+    # If BOTH are exhausted, the APIError reaches AivaAgent.llm_node, which speaks
+    # the graceful fallback line instead of going silent (Phase 7).
+    fallback_model = os.environ.get("AIVA_FALLBACK_MODEL", "llama-3.1-8b-instant")
+    llm = FallbackAdapter(
+        [
+            groq.LLM(model="llama-3.3-70b-versatile", temperature=0.3),
+            groq.LLM(model=fallback_model, temperature=0.3),
+        ]
+    )
     tts = elevenlabs.TTS(
         api_key=os.environ["ELEVENLABS_API_KEY"],
         voice_id="EXAVITQu4vr4xnSDxMaL",  # "Sarah" — mature, reassuring; fits a clinic receptionist
@@ -229,8 +255,9 @@ async def entrypoint(ctx: JobContext) -> None:
 
     logger.info(
         "Providers loaded | STT=Groq(whisper-large-v3-turbo) "
-        "LLM=Groq(llama-3.3-70b-versatile) TTS=ElevenLabs(Sarah) "
-        "VAD=Silero TurnDetector=LiveKit(english)"
+        "LLM=Groq(llama-3.3-70b-versatile -> %s fallback) TTS=ElevenLabs(Sarah) "
+        "VAD=Silero TurnDetector=LiveKit(english)",
+        fallback_model,
     )
 
     session = AgentSession(
