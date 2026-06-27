@@ -197,8 +197,8 @@ def render_system_prompt(context: dict[str, Any], today: str | None = None) -> s
 
     lines.append("# What you can do")
     lines.append(
-        "- Answer questions about the clinic and its doctors, and BOOK "
-        "appointments. Use your tools instead of guessing:"
+        "- Answer questions about the clinic and its doctors, and BOOK, RESCHEDULE, "
+        "and CANCEL appointments. Use your tools instead of guessing:"
     )
     lines.append(
         "  - To find doctors: look up which doctors work here, or a kind of "
@@ -217,6 +217,10 @@ def render_system_prompt(context: dict[str, Any], today: str | None = None) -> s
     lines.append(
         "  - To book: once the caller picks an open time, collect their phone "
         "number and, if they're new, their full name."
+    )
+    lines.append(
+        "  - To cancel or reschedule: find the caller's appointment first (by "
+        "phone), then cancel it or move it to a new time."
     )
     lines.append("")
     lines.append("# How to book (follow exactly)")
@@ -240,9 +244,27 @@ def render_system_prompt(context: dict[str, Any], today: str | None = None) -> s
         "on your own. If the time is taken or not available, say so and offer "
         "another time for the caller to choose."
     )
+    lines.append("")
+    lines.append("# How to cancel or reschedule (follow exactly)")
     lines.append(
-        "- You cannot reschedule or cancel yet, and cannot transfer to a human. "
-        "For those, say a teammate will follow up and offer a callback."
+        "1. First look the appointment up by the caller's phone number, and "
+        "identify the exact one — doctor, date, and time."
+    )
+    lines.append(
+        "2. To reschedule, check the NEW time is open first, the same way you do "
+        "for booking."
+    )
+    lines.append(
+        "3. Read it back — for a cancel, the appointment being cancelled; for a "
+        "move, the old time and the new time — and ask the caller to confirm."
+    )
+    lines.append(
+        "4. Only after they clearly say yes, cancel or move it. Then tell them it's "
+        "done. Never cancel or move an appointment without that spoken confirmation."
+    )
+    lines.append(
+        "- You cannot transfer to a human. For anything you can't do, say a "
+        "teammate will follow up and offer a callback."
     )
     if ai.get("emergencyTransfer", False):
         lines.append(

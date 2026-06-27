@@ -56,22 +56,54 @@ const calendarDate = z
     );
   }, "date is not a valid calendar date.");
 
+// Reusable: clinic-local wall-clock "HH:mm" (24h).
+const clockTime = z
+  .string()
+  .regex(/^([01]\d|2[0-3]):[0-5]\d$/, "time must be HH:mm (24h).");
+
+const doctorName = z.string().trim().min(1, "doctorName is required.").max(120);
+const phone = z.string().trim().min(3, "phone is required.").max(32);
+
 // Phase 4 booking (write). The agent sends a resolved doctor name, an absolute
 // date + "HH:mm" time (clinic-local), the caller's phone, and — for a first-time
 // caller — their name. patientName is optional: existing callers are matched by
 // phone, and a missing name falls back to a placeholder.
 export const voiceBookBodySchema = z.object({
   clinicId: z.string().min(1, "clinicId is required."),
-  doctorName: z.string().trim().min(1, "doctorName is required.").max(120),
+  doctorName,
   date: calendarDate,
-  time: z
-    .string()
-    .regex(/^([01]\d|2[0-3]):[0-5]\d$/, "time must be HH:mm (24h)."),
-  phone: z.string().trim().min(3, "phone is required.").max(32),
+  time: clockTime,
+  phone,
   patientName: z.string().trim().min(1).max(120).optional(),
+});
+
+// Phase 6 cancel (write). Identifies the appointment by the caller's phone plus
+// the doctor + clinic-local date/time the caller states (the agent reads these
+// from a prior lookup). No DB ids are exposed to the voice layer.
+export const voiceCancelBodySchema = z.object({
+  clinicId: z.string().min(1, "clinicId is required."),
+  doctorName,
+  date: calendarDate,
+  time: clockTime,
+  phone,
+});
+
+// Phase 6 reschedule (write). Same identity fields as cancel (doctor + current
+// date/time + phone) plus the NEW clinic-local date/time to move it to. The
+// doctor stays the same; the new slot is validated against the schedule grid.
+export const voiceRescheduleBodySchema = z.object({
+  clinicId: z.string().min(1, "clinicId is required."),
+  doctorName,
+  date: calendarDate,
+  time: clockTime,
+  newDate: calendarDate,
+  newTime: clockTime,
+  phone,
 });
 
 export type VoiceDoctorsQuery = z.infer<typeof voiceDoctorsQuerySchema>;
 export type VoiceAvailabilityQuery = z.infer<typeof voiceAvailabilityQuerySchema>;
 export type VoiceAppointmentsQuery = z.infer<typeof voiceAppointmentsQuerySchema>;
 export type VoiceBookBody = z.infer<typeof voiceBookBodySchema>;
+export type VoiceCancelBody = z.infer<typeof voiceCancelBodySchema>;
+export type VoiceRescheduleBody = z.infer<typeof voiceRescheduleBodySchema>;

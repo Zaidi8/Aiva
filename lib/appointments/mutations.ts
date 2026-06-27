@@ -231,3 +231,109 @@ export async function bookAppointmentForVoice(
     throw e;
   }
 }
+
+// ────────────────────────────────────────────────────────────────────────────
+// Voice cancel + reschedule (Phase 6)
+//
+// The voice layer has no appointment ids, so both helpers identify the target
+// the way a caller describes it: their phone + the doctor + the clinic-local
+// instant the agent read back from a prior lookup. We match on phone via the
+// patient relation (NOT a separately-fetched patient id), and only ever touch
+// non-Cancelled rows, scoped to the calling clinic. SEQUENTIAL only.
+// ────────────────────────────────────────────────────────────────────────────
+
+const VOICE_APPT_INCLUDE = {
+  patient: { select: { id: true, fullName: true, phoneNumber: true } },
+  doctor: { select: { id: true, name: true } },
+} as const;
+
+type VoiceAppt = Appointment & {
+  patient: { id: string; fullName: string; phoneNumber: string };
+  doctor: { id: string; name: string };
+};
+
+export interface VoiceCancelInput {
+  phone: string;
+  doctorId: string;
+  scheduledAt: Date; // true instant of the appointment to cancel
+}
+
+export type VoiceCancelResult =
+  | { cancelled: true; appointment: VoiceAppt }
+  | { cancelled: false; reason: "not_found" };
+
+export async function cancelAppointmentForVoice(
+  staff: Pick<ClinicStaff, "clinicId">,
+  input: VoiceCancelInput,
+): Promise<VoiceCancelResult> {
+  const phone = normalizePhone(input.phone);
+  // Find the caller's live appointment at that doctor+instant.
+  const existing = await prisma.appointment.findFirst({
+    where: {
+      ...clinicWhere(staff),
+      doctorId: input.doctorId,
+      scheduledAt: input.scheduledAt,
+      status: { not: "Cancelled" },
+      patient: { phoneNumber: phone },
+    },
+    include: VOICE_APPT_INCLUDE,
+  });
+  if (!existing) return { cancelled: false, reason: "not_found" };
+  await prisma.appointment.update({
+    where: { id: existing.id },
+    data: { status: "Cancelled" },
+  });
+  return { cancelled: true, appointment: existing };
+}
+
+export interface VoiceRescheduleInput {
+  phone: string;
+  doctorId: string;
+  fromScheduledAt: Date; // current instant (identifies the appointment)
+  toScheduledAt: Date; // new instant (validated on the grid by the endpoint)
+  durationMin: number;
+}
+
+export type VoiceRescheduleResult =
+  | { rescheduled: true; appointment: VoiceAppt }
+  | { rescheduled: false; reason: "not_found" | "slot_taken" };
+
+export async function rescheduleAppointmentForVoice(
+  staff: Pick<ClinicStaff, "clinicId">,
+  input: VoiceRescheduleInput,
+): Promise<VoiceRescheduleResult> {
+  const phone = normalizePhone(input.phone);
+  const existing = await prisma.appointment.findFirst({
+    where: {
+      ...clinicWhere(staff),
+      doctorId: input.doctorId,
+      scheduledAt: input.fromScheduledAt,
+      status: { not: "Cancelled" },
+      patient: { phoneNumber: phone },
+    },
+    include: VOICE_APPT_INCLUDE,
+  });
+  if (!existing) return { rescheduled: false, reason: "not_found" };
+  // Moving to the same instant is a no-op success (idempotent re-ask).
+  if (existing.scheduledAt.getTime() === input.toScheduledAt.getTime()) {
+    return { rescheduled: true, appointment: existing };
+  }
+  // The @@unique([doctorId, scheduledAt]) guard makes the move race-safe; a
+  // collision with another appointment surfaces as P2002 → slot_taken.
+  try {
+    const updated = await prisma.appointment.update({
+      where: { id: existing.id },
+      data: { scheduledAt: input.toScheduledAt, durationMin: input.durationMin },
+      include: VOICE_APPT_INCLUDE,
+    });
+    return { rescheduled: true, appointment: updated };
+  } catch (e) {
+    if (
+      e instanceof Prisma.PrismaClientKnownRequestError &&
+      e.code === "P2002"
+    ) {
+      return { rescheduled: false, reason: "slot_taken" };
+    }
+    throw e;
+  }
+}

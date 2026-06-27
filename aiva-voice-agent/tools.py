@@ -217,8 +217,9 @@ def build_tools(config: ToolConfig) -> list:
         """Look up the caller's upcoming appointments by the phone number they give.
 
         Ask the caller for the phone number their appointment is under, then pass
-        it as `phone`. Returns their upcoming appointments. Read-only — you cannot
-        change or cancel them yet.
+        it as `phone`. Returns their upcoming appointments. Use this FIRST when a
+        caller wants to cancel or move an appointment, so you know the exact
+        doctor, date, and time to pass to cancel_appointment / reschedule_appointment.
         """
         _say_filler(context, "Let me pull that up.")
         data = await _get(config, "appointments", {"phone": phone})
@@ -291,4 +292,119 @@ def build_tools(config: ToolConfig) -> list:
         # slot_unavailable
         return f"{doctor_name} doesn't have {time} open on {date}. Want to pick another time?"
 
-    return [list_doctors, check_availability, lookup_appointments, book_appointment]
+    @function_tool
+    async def cancel_appointment(
+        context: RunContext,
+        doctor_name: str,
+        date: str,
+        time: str,
+        phone: str,
+    ) -> str:
+        """Cancel one of the caller's existing appointments. WRITES to records.
+
+        ONLY call this AFTER you have (1) looked the appointment up with
+        lookup_appointments, (2) read it back to the caller — doctor, date, time —
+        and (3) gotten a clear spoken "yes" to cancel it.
+
+        Args:
+          doctor_name: the doctor on the appointment being cancelled.
+          date: that appointment's date, YYYY-MM-DD.
+          time: that appointment's time, 24-hour "HH:mm".
+          phone: the phone number the appointment is under.
+        """
+        _say_filler(context, "Okay, let me cancel that.")
+        data = await _post(
+            config,
+            "cancel",
+            {"doctorName": doctor_name, "date": date, "time": time, "phone": phone},
+        )
+        if data is None:
+            return "I couldn't cancel that right now. A teammate will follow up."
+        if data.get("cancelled"):
+            appt = data.get("appointment") or {}
+            who = appt.get("doctor", doctor_name)
+            when_d = appt.get("date", date)
+            when_t = appt.get("time", time)
+            return f"Done — your appointment with {who} on {when_d} at {when_t} is cancelled."
+        reason = data.get("reason")
+        if reason == "ambiguous":
+            names = ", ".join(data.get("candidates") or [])
+            return f"There are a few matching doctors: {names}. Which one did you mean?"
+        if reason == "not_found":
+            return (
+                f"I couldn't find an appointment with {doctor_name} on {date} at {time} "
+                f"under {phone}. Could you double-check those details?"
+            )
+        return "I couldn't cancel that one. Could you double-check the details?"
+
+    @function_tool
+    async def reschedule_appointment(
+        context: RunContext,
+        doctor_name: str,
+        date: str,
+        time: str,
+        new_date: str,
+        new_time: str,
+        phone: str,
+    ) -> str:
+        """Move one of the caller's appointments to a new time. WRITES to records.
+
+        The doctor stays the same. ONLY call this AFTER you have (1) looked the
+        appointment up with lookup_appointments, (2) confirmed the NEW time is open
+        with check_availability, (3) read the move back to the caller — from the old
+        date/time to the new date/time — and (4) gotten a clear spoken "yes".
+
+        Args:
+          doctor_name: the doctor on the appointment (unchanged by the move).
+          date: the appointment's CURRENT date, YYYY-MM-DD.
+          time: the appointment's CURRENT time, 24-hour "HH:mm".
+          new_date: the NEW date to move it to, YYYY-MM-DD.
+          new_time: the NEW time to move it to, 24-hour "HH:mm".
+          phone: the phone number the appointment is under.
+        """
+        _say_filler(context, "Okay, let me move that for you.")
+        data = await _post(
+            config,
+            "reschedule",
+            {
+                "doctorName": doctor_name,
+                "date": date,
+                "time": time,
+                "newDate": new_date,
+                "newTime": new_time,
+                "phone": phone,
+            },
+        )
+        if data is None:
+            return "I couldn't reschedule that right now. A teammate will follow up."
+        if data.get("rescheduled"):
+            appt = data.get("appointment") or {}
+            who = appt.get("doctor", doctor_name)
+            when_d = appt.get("date", new_date)
+            when_t = appt.get("time", new_time)
+            return f"Done — you're now booked with {who} on {when_d} at {when_t}."
+        reason = data.get("reason")
+        if reason == "ambiguous":
+            names = ", ".join(data.get("candidates") or [])
+            return f"There are a few matching doctors: {names}. Which one did you mean?"
+        if reason == "not_found":
+            return (
+                f"I couldn't find an appointment with {doctor_name} on {date} at {time} "
+                f"under {phone}. Could you double-check those details?"
+            )
+        if reason == "slot_taken":
+            return f"Sorry, {new_time} on {new_date} was just taken. Want to pick another time?"
+        # slot_unavailable
+        return (
+            f"{doctor_name} doesn't have {new_time} open on {new_date}. "
+            "Want to pick another time?"
+        )
+
+    return [
+        list_doctors,
+        check_availability,
+        lookup_appointments,
+        book_appointment,
+        cancel_appointment,
+        reschedule_appointment,
+    ]
