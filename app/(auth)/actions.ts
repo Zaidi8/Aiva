@@ -33,26 +33,13 @@ export async function register(formData: FormData): Promise<ActionResult> {
     password: formData.get("password") ?? "",
     fullName: formData.get("fullName") ?? "",
     clinicName: formData.get("clinicName") ?? "",
-    clinicPhone: formData.get("clinicPhone") ?? "",
-    clinicAddress: formData.get("clinicAddress") ?? "",
-    clinicEmail: formData.get("clinicEmail") ?? "",
-    jobTitle: formData.get("jobTitle") ?? "",
   });
 
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
   }
 
-  const {
-    email,
-    password,
-    fullName,
-    clinicName,
-    clinicPhone,
-    clinicAddress,
-    clinicEmail,
-    jobTitle,
-  } = parsed.data;
+  const { email, password, fullName, clinicName } = parsed.data;
 
   const supabase = await createClient();
   const { data: authData, error: authError } = await supabase.auth.signUp({
@@ -75,15 +62,10 @@ export async function register(formData: FormData): Promise<ActionResult> {
 
   try {
     await prisma.$transaction(async (tx) => {
+      // Only the clinic NAME is set at sign-up; contact details + timezone are
+      // captured in the /onboarding flow. timezone defaults to "Asia/Karachi".
       const clinic = await tx.clinic.create({
-        data: {
-          name: clinicName,
-          phone: clinicPhone,
-          address: clinicAddress,
-          email: clinicEmail,
-          // timezone defaults to "Asia/Karachi" via the schema — don't ask
-          // the user during registration.
-        },
+        data: { name: clinicName },
       });
       await tx.clinicStaff.create({
         data: {
@@ -91,7 +73,6 @@ export async function register(formData: FormData): Promise<ActionResult> {
           fullName,
           email,
           role: "Admin",
-          jobTitle,
           clinicId: clinic.id,
         },
       });
@@ -115,8 +96,10 @@ export async function register(formData: FormData): Promise<ActionResult> {
     };
   }
 
+  // New clinics land in the guided onboarding flow (clinic details → first
+  // doctor → invite team). Returning users log in straight to the dashboard.
   revalidatePath("/", "layout");
-  redirect("/dashboard");
+  redirect("/onboarding");
 }
 
 export async function signout(): Promise<void> {

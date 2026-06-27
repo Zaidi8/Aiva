@@ -1,23 +1,11 @@
-// Zod schemas for auth-related Server Actions. Centralized here so the
-// register form UI can later import the same shape if we move to client-side
-// pre-validation.
+// Zod schemas for auth-related Server Actions.
+//
+// Sign-up is deliberately minimal — it only provisions a Clinic + an Admin
+// login. Everything else (clinic contact details, doctors, schedules, team,
+// AI settings) is collected afterwards in the /onboarding flow, so the
+// registration form stays to four fields.
 
 import { z } from "zod";
-
-// Treat empty-string optional fields the same as missing — the register form
-// submits empty strings for fields the user didn't fill in.
-const optionalString = z
-  .string()
-  .trim()
-  .transform((v) => (v === "" ? undefined : v))
-  .optional();
-
-const optionalEmail = z
-  .string()
-  .trim()
-  .transform((v) => (v === "" ? undefined : v))
-  .optional()
-  .pipe(z.string().email("Clinic email must be a valid email address.").optional());
 
 export const registerSchema = z.object({
   email: z
@@ -32,11 +20,6 @@ export const registerSchema = z.object({
     .trim()
     .transform((v) => (v === "" ? "My Clinic" : v))
     .pipe(z.string().min(1)),
-
-  clinicPhone: optionalString,
-  clinicAddress: optionalString,
-  clinicEmail: optionalEmail,
-  jobTitle: optionalString,
 });
 
 export type RegisterInput = z.infer<typeof registerSchema>;

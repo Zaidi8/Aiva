@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useTransition } from "react";
-import { Mail, Lock, User, Eye, EyeOff, Building2, Phone, MapPin, Briefcase } from "lucide-react";
+import { Mail, Lock, User, Eye, EyeOff, Building2 } from "lucide-react";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
@@ -174,61 +174,10 @@ export function LoginPage() {
                         </div>
                       </div>
 
-                      <div className="space-y-2">
-                        <Label htmlFor="clinicPhone">Clinic Phone</Label>
-                        <div className="relative">
-                          <Phone className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
-                          <Input
-                            id="clinicPhone"
-                            name="clinicPhone"
-                            type="tel"
-                            placeholder="+92 300 1234567"
-                            className="pl-10 h-12"
-                          />
-                        </div>
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label htmlFor="clinicAddress">Clinic Address</Label>
-                        <div className="relative">
-                          <MapPin className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
-                          <textarea
-                            id="clinicAddress"
-                            name="clinicAddress"
-                            rows={2}
-                            placeholder="123 Main St, Karachi"
-                            className="pl-10 pt-3 pb-3 pr-3 w-full min-h-12 rounded-md border border-input bg-transparent text-sm resize-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                          />
-                        </div>
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label htmlFor="clinicEmail">Clinic Email</Label>
-                        <div className="relative">
-                          <Mail className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
-                          <Input
-                            id="clinicEmail"
-                            name="clinicEmail"
-                            type="email"
-                            placeholder="contact@clinic.com"
-                            className="pl-10 h-12"
-                          />
-                        </div>
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label htmlFor="jobTitle">Your Job Title</Label>
-                        <div className="relative">
-                          <Briefcase className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
-                          <Input
-                            id="jobTitle"
-                            name="jobTitle"
-                            type="text"
-                            placeholder="e.g. Practice Manager"
-                            className="pl-10 h-12"
-                          />
-                        </div>
-                      </div>
+                      <p className="text-xs text-gray-500 -mt-2">
+                        You’ll add your clinic details, doctors, and team right
+                        after — this just creates your account.
+                      </p>
 
                       <div className="space-y-2">
                         <Label htmlFor="password">
