@@ -28,6 +28,13 @@ export const voiceAvailabilityQuerySchema = z.object({
         dt.getUTCDate() === day
       );
     }, "date is not a valid calendar date."),
+  // Phase 5: the clinic-local time the caller actually asked for ("HH:mm", 24h).
+  // When present the endpoint reports whether THAT time is open plus the nearest
+  // alternatives, instead of dumping every slot of the day (Phase 5 bug #3).
+  time: z
+    .string()
+    .regex(/^([01]\d|2[0-3]):[0-5]\d$/, "time must be HH:mm (24h).")
+    .optional(),
 });
 
 export const voiceAppointmentsQuerySchema = z.object({

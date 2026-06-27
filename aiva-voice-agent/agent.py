@@ -22,12 +22,16 @@ import os
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+from typing import AsyncIterable
+
 from dotenv import load_dotenv
+from livekit import rtc
 from livekit.agents import (
     Agent,
     AgentSession,
     JobContext,
     JobProcess,
+    ModelSettings,
     WorkerOptions,
     cli,
 )
@@ -41,6 +45,7 @@ from clinic_context import (
     render_greeting,
     render_system_prompt,
 )
+from speech_filter import sanitize_for_speech
 from tools import ToolConfig, build_tools
 
 load_dotenv()
@@ -57,6 +62,24 @@ logging.basicConfig(
 )
 logger = logging.getLogger("aiva.agent")
 logger.info("Logging to console + %s", _LOG_FILE)
+
+
+class AivaAgent(Agent):
+    """Clinic receptionist agent with a sanitized TTS path (Phase 5 bug #1).
+
+    Overrides `tts_node` so any leaked tool-call syntax the LLM emits as text is
+    scrubbed BEFORE synthesis — the caller never hears "function …". Real tool
+    calls are unaffected (they travel the structured tool-call channel, not this
+    text stream).
+    """
+
+    async def tts_node(
+        self, text: AsyncIterable[str], model_settings: ModelSettings
+    ) -> AsyncIterable[rtc.AudioFrame]:
+        async for frame in Agent.default.tts_node(
+            self, sanitize_for_speech(text), model_settings
+        ):
+            yield frame
 
 
 def _require_env(name: str) -> str:
@@ -196,7 +219,7 @@ async def entrypoint(ctx: JobContext) -> None:
     )
     logger.info("Loaded %d read-only tools: %s", len(tools), [t.info.name for t in tools])
 
-    agent = Agent(instructions=system_prompt, tools=tools)
+    agent = AivaAgent(instructions=system_prompt, tools=tools)
 
     await session.start(agent=agent, room=ctx.room)
     logger.info("AgentSession started — Aiva is speaking the greeting.")

@@ -18,15 +18,23 @@ export const runtime = "nodejs";
 
 const MAX_SLOTS = 12;
 
+// "HH:mm" clinic-local → minutes since midnight, for nearest-slot ranking.
+function toMinutes(hhmm: string): number {
+  const [h, m] = hhmm.split(":").map(Number);
+  return h * 60 + m;
+}
+
 export const GET = withWebhookSecret(async (req) => {
   const { searchParams } = new URL(req.url);
   const parsed = voiceAvailabilityQuerySchema.safeParse({
     clinicId: searchParams.get("clinicId") ?? "",
     doctorName: searchParams.get("doctorName") ?? "",
     date: searchParams.get("date") ?? "",
+    // optional: undefined when the caller didn't name a specific time.
+    time: searchParams.get("time") || undefined,
   });
   if (!parsed.success) return failValidation(parsed.error);
-  const { clinicId, doctorName, date } = parsed.data;
+  const { clinicId, doctorName, date, time } = parsed.data;
   const staff = { clinicId };
 
   try {
@@ -75,6 +83,30 @@ export const GET = withWebhookSecret(async (req) => {
     const times = slots
       .filter((s) => toLocalDate(new Date(s.start), clinic.timezone) === date)
       .map((s) => toLocalTime(new Date(s.start), clinic.timezone));
+
+    // Phase 5 (#3/#4): when the caller named a target time, don't dump the whole
+    // day — report whether THAT exact time is open plus the few nearest open
+    // alternatives (by clock distance). This keeps the agent focused on the
+    // requested time and stops it offering/booking an arbitrary other slot.
+    if (time) {
+      const target = toMinutes(time);
+      const requestedAvailable = times.includes(time);
+      const nearest = [...times]
+        .filter((t) => t !== time)
+        .sort((a, b) => Math.abs(toMinutes(a) - target) - Math.abs(toMinutes(b) - target))
+        .slice(0, 3);
+      return ok({
+        resolved: true,
+        doctor: { name: doctor.name, specialization: doctor.specialization },
+        date,
+        timezone: clinic.timezone,
+        requestedTime: time,
+        requestedAvailable,
+        nearest,
+        totalSlots: times.length,
+      });
+    }
+
     return ok({
       resolved: true,
       doctor: { name: doctor.name, specialization: doctor.specialization },

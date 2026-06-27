@@ -23,9 +23,24 @@ from dataclasses import dataclass
 from typing import Any
 
 import aiohttp
-from livekit.agents import function_tool
+from livekit.agents import RunContext, function_tool
 
 logger = logging.getLogger("aiva.tools")
+
+
+def _say_filler(context: RunContext, text: str) -> None:
+    """Speak a brief acknowledgement before a slow backend round-trip.
+
+    Phase 5 bug #5: the availability/booking calls hit a geographically-distant
+    DB (~4-5s warm), and without feedback the caller hears dead air and assumes
+    the line dropped. We speak a short filler immediately so the wait is filled.
+    Fire-and-forget (not awaited) and `add_to_chat_ctx=False` so it doesn't enter
+    the LLM context or block the tool. Fail-soft: never let a filler break a call.
+    """
+    try:
+        context.session.say(text, add_to_chat_ctx=False)
+    except Exception as exc:  # noqa: BLE001 — a filler must never drop the call
+        logger.debug("filler say failed (non-fatal): %s", exc)
 
 # The clinic backend can sit a long way from the DB region; availability does
 # several DB round-trips. 3s was too tight and made check_availability time out
@@ -137,15 +152,28 @@ def build_tools(config: ToolConfig) -> list:
         return "Doctors: " + "; ".join(parts) + "."
 
     @function_tool
-    async def check_availability(doctor_name: str, date: str) -> str:
+    async def check_availability(
+        context: RunContext, doctor_name: str, date: str, time: str = ""
+    ) -> str:
         """Check a doctor's open appointment slots on a specific date.
 
         `doctor_name` is the doctor the caller named. `date` MUST be an absolute
         calendar date in YYYY-MM-DD format — resolve relative phrases like
-        "tomorrow" or "next Monday" to a real date before calling. Returns the
-        open slot times; you cannot book them yet, only report availability.
+        "tomorrow" or "next Monday" to a real date before calling.
+
+        If the caller named a specific time, ALWAYS pass it as `time` in 24-hour
+        "HH:mm" (e.g. "16:30" for 4:30pm). When you do, this reports whether THAT
+        exact time is open plus the nearest alternatives — so you can offer the
+        time they actually asked for instead of listing the whole day. Leave
+        `time` empty only if the caller hasn't named a time yet.
+
+        Read-only — you cannot book here, only report availability.
         """
-        data = await _get(config, "availability", {"doctorName": doctor_name, "date": date})
+        _say_filler(context, "Let me check that for you.")
+        params = {"doctorName": doctor_name, "date": date}
+        if time.strip():
+            params["time"] = time.strip()
+        data = await _get(config, "availability", params)
         if data is None:
             return "I couldn't check availability right now."
         if not data.get("resolved"):
@@ -155,22 +183,44 @@ def build_tools(config: ToolConfig) -> list:
                 return f"There are a few matching doctors: {names}. Which one did you mean?"
             return f"I couldn't find a doctor named {doctor_name}."
         doctor = (data.get("doctor") or {}).get("name", doctor_name)
+
+        # Time-specific path (Phase 5 #3/#4): answer about the requested time only.
+        if data.get("requestedTime"):
+            req = data["requestedTime"]
+            if data.get("totalSlots", 0) == 0:
+                return f"{doctor} has no open times on {date} at all."
+            if data.get("requestedAvailable"):
+                return f"Yes — {doctor} has {req} open on {date}."
+            nearest = data.get("nearest") or []
+            if not nearest:
+                return f"{doctor} doesn't have {req} open on {date}, and has no other times that day."
+            return (
+                f"{doctor} doesn't have {req} open on {date}. "
+                f"The nearest open times are {', '.join(nearest)}. "
+                "Would any of those work?"
+            )
+
+        # No specific time asked: offer a few times and invite the caller to pick.
         slots = data.get("slots") or []
         total = data.get("totalSlots", len(slots))
         if not slots:
             return f"{doctor} has no open slots on {date}."
-        shown = ", ".join(slots)
-        more = f" (and {total - len(slots)} more)" if total > len(slots) else ""
-        return f"{doctor} has these open times on {date}: {shown}{more}."
+        shown = ", ".join(slots[:4])
+        more = f", and {total - 4} more" if total > 4 else ""
+        return (
+            f"{doctor} has openings on {date} — for example {shown}{more}. "
+            "What time works best for you?"
+        )
 
     @function_tool
-    async def lookup_appointments(phone: str) -> str:
+    async def lookup_appointments(context: RunContext, phone: str) -> str:
         """Look up the caller's upcoming appointments by the phone number they give.
 
         Ask the caller for the phone number their appointment is under, then pass
         it as `phone`. Returns their upcoming appointments. Read-only — you cannot
         change or cancel them yet.
         """
+        _say_filler(context, "Let me pull that up.")
         data = await _get(config, "appointments", {"phone": phone})
         if data is None:
             return "I couldn't look up appointments right now."
@@ -188,6 +238,7 @@ def build_tools(config: ToolConfig) -> list:
 
     @function_tool
     async def book_appointment(
+        context: RunContext,
         doctor_name: str,
         date: str,
         time: str,
@@ -209,6 +260,7 @@ def build_tools(config: ToolConfig) -> list:
           patient_name: the caller's full name. Required for a first-time caller;
             pass it whenever you have it.
         """
+        _say_filler(context, "Okay, booking that now.")
         body: dict[str, Any] = {
             "doctorName": doctor_name,
             "date": date,

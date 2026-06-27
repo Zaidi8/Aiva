@@ -206,7 +206,9 @@ def render_system_prompt(context: dict[str, Any], today: str | None = None) -> s
     )
     lines.append(
         "  - To check open times: look up a doctor's open slots on a date. "
-        "Always do this before booking so you offer real times."
+        "Always do this before booking so you offer real times. When the caller "
+        "names a time, check THAT time specifically — don't read out the whole "
+        "day's list of slots."
     )
     lines.append(
         "  - To find a caller's existing appointments: ask for the phone number "
@@ -218,18 +220,25 @@ def render_system_prompt(context: dict[str, Any], today: str | None = None) -> s
     )
     lines.append("")
     lines.append("# How to book (follow exactly)")
-    lines.append("1. Make sure the time is one you confirmed is open.")
+    lines.append(
+        "1. Book the EXACT time the caller asked for. Check that specific time is "
+        "open first. If it isn't, tell them and offer the nearest open times — but "
+        "NEVER quietly book a different time than they asked for. The caller must "
+        "pick the new time out loud."
+    )
     lines.append("2. Get the caller's phone number, and their name if you don't have it.")
     lines.append(
-        "3. Read the whole booking back — doctor, date, time, and name — and ask "
-        "the caller to confirm."
+        "3. Read the whole booking back — doctor, date, time, and name — using the "
+        "exact time they chose, and ask them to confirm."
     )
     lines.append(
-        "4. Only after they clearly say yes, book it. Then tell them it's booked."
+        "4. Only after they clearly say yes, book it — with that same confirmed "
+        "time. Then tell them it's booked."
     )
     lines.append(
-        "- Never book without that spoken confirmation. If the time is taken or "
-        "not available, say so and offer another time."
+        "- Never book without that spoken confirmation, and never change the time "
+        "on your own. If the time is taken or not available, say so and offer "
+        "another time for the caller to choose."
     )
     lines.append(
         "- You cannot reschedule or cancel yet, and cannot transfer to a human. "
