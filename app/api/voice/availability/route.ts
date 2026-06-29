@@ -79,8 +79,16 @@ export const GET = withWebhookSecret(async (req) => {
 
     // Slots are true instants; keep only those whose clinic-local date matches
     // the requested day (the ±1-day padded bounds can include neighbour days),
-    // then render each as clinic-local "HH:mm" for speaking.
+    // and that are still in the FUTURE. Dropping past slots is essential: the
+    // booking endpoint rejects any time < now (book/route.ts), so offering an
+    // already-passed slot makes the agent suggest it, fail to book it, apologise,
+    // suggest the next-nearest (also past), and loop. computeAvailability returns
+    // the whole day's grid with no time-of-day cutoff, so we filter here. The
+    // `> now` bound is stricter than booking's `< now` reject, so anything we
+    // offer is bookable (no availability/booking mismatch).
+    const now = Date.now();
     const times = slots
+      .filter((s) => new Date(s.start).getTime() > now)
       .filter((s) => toLocalDate(new Date(s.start), clinic.timezone) === date)
       .map((s) => toLocalTime(new Date(s.start), clinic.timezone));
 
