@@ -52,18 +52,29 @@ from tools import ToolConfig, build_tools
 
 load_dotenv()
 
-# Log to BOTH the console and a file, always. `agent.py dev` otherwise writes only
-# to the terminal, which makes a call impossible to inspect after the fact. The
-# file path is overridable via AIVA_LOG_FILE; default /tmp/aiva-worker.log. This
-# is what lets a call be monitored (transcript, tool calls, timings) post-hoc.
+# Log to the console always, and to a file when the path is writable. `agent.py dev`
+# otherwise writes only to the terminal, which makes a local call impossible to
+# inspect after the fact. The file path is overridable via AIVA_LOG_FILE; default
+# /tmp/aiva-worker.log. In a container (non-root user / read-only fs) the file may
+# not be openable — there we fall back to stdout only, which LiveKit Cloud captures
+# (`lk agent logs`), instead of crashing the worker on startup.
 _LOG_FILE = os.environ.get("AIVA_LOG_FILE", "/tmp/aiva-worker.log")
+_handlers: list[logging.Handler] = [logging.StreamHandler()]
+_file_log_error: str | None = None
+try:
+    _handlers.append(logging.FileHandler(_LOG_FILE))
+except OSError as exc:  # permission denied / read-only fs (e.g. in the deployed container)
+    _file_log_error = str(exc)
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s | %(message)s",
-    handlers=[logging.StreamHandler(), logging.FileHandler(_LOG_FILE)],
+    handlers=_handlers,
 )
 logger = logging.getLogger("aiva.agent")
-logger.info("Logging to console + %s", _LOG_FILE)
+if _file_log_error:
+    logger.info("Logging to console only (file log unavailable: %s)", _file_log_error)
+else:
+    logger.info("Logging to console + %s", _LOG_FILE)
 
 # Spoken when an LLM completion can't be produced for a turn (rate limit /
 # connection / timeout, after the framework's own retries). Better than the dead
