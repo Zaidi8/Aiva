@@ -13,6 +13,12 @@ export const registerSchema = z.object({
     .trim()
     .min(1, "Email is required.")
     .email("Email must be a valid email address."),
+  // Baseline length check only. For a healthcare product, enable Supabase
+  // Auth's built-in password-strength requirement + Leaked Password Protection
+  // (HIBP) in the dashboard (Authentication → Policies) — that enforces
+  // complexity and blocks known-breached passwords at the source, which a
+  // client-side zod rule can't. Keep this in sync if the Supabase minimum
+  // changes.
   password: z.string().min(8, "Password must be at least 8 characters."),
   fullName: z.string().trim().min(1, "Full name is required."),
   clinicName: z

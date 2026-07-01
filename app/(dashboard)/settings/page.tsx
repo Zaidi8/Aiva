@@ -13,6 +13,7 @@
 import { Suspense } from 'react';
 import { requireStaff } from '@/lib/auth';
 import { getClinic } from '@/lib/clinics/queries';
+import { hasBookableDoctor } from '@/lib/clinics/mutations';
 import { getAiSettings } from '@/lib/ai-settings/queries';
 import { updateAiSettings } from '@/lib/ai-settings/mutations';
 import { SettingsPage } from '@/components/pages/SettingsPage';
@@ -28,6 +29,8 @@ async function SettingsPageContent({ tab }: { tab: string }) {
   // Defensive bootstrap — register normally seeds AiSettings, but if a clinic
   // predates that flow we hydrate with defaults rather than crashing.
   const aiSettings = aiSettingsMaybe ?? (await updateAiSettings(staff, {}));
+  // Go-live readiness drives the "voice on, but nothing bookable" warning.
+  const voiceGoLiveReady = await hasBookableDoctor(staff);
 
   return (
     <SettingsPage
@@ -55,6 +58,7 @@ async function SettingsPageContent({ tab }: { tab: string }) {
         handleRescheduling: aiSettings.handleRescheduling,
         emergencyTransfer: aiSettings.emergencyTransfer,
       }}
+      voiceGoLiveReady={voiceGoLiveReady}
     />
   );
 }

@@ -3,12 +3,26 @@
 // Field rules mirror prisma/schema.prisma:
 //   • name        required → keep non-empty
 //   • phone, address, email, voicePhone, timezone → all optional, nullable
-//   • timezone defaults to "Asia/Karachi" in the DB; we don't force it here
+//   • timezone MUST be a real IANA zone. It's the source of truth for every
+//     availability/booking computation, which run it through
+//     Intl.DateTimeFormat — an INVALID zone throws RangeError and 500s the
+//     voice booking/availability endpoints, so we reject it at the edge here.
 //
 // Empty strings on optional fields are normalised to `undefined` (omit) so
 // the dashboard form can submit "" without us writing `phone: ""` to the DB.
 
 import { z } from "zod";
+
+// True only for zones Intl accepts. Probing via DateTimeFormat is the most
+// portable check (works even where Intl.supportedValuesOf is unavailable).
+function isValidTimeZone(tz: string): boolean {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 const optionalTrimmed = (max: number) =>
   z
@@ -35,15 +49,17 @@ export const updateClinicSchema = z.object({
   phone: optionalTrimmed(32),
   address: optionalTrimmed(500),
   email: optionalEmail,
-  // voicePhone is the inbound number patients dial. Setting it from the
-  // dashboard is supported (the AI module owns the actual provisioning, but
-  // editing the stored value is fine — Clinic.voicePhone @unique enforces
-  // collisions across tenants).
+  // voicePhone is the inbound number patients dial. The voice runtime resolves
+  // a clinic by exact-matching the dialed number against this field, so the
+  // mutation normalizes it to a canonical form before writing (see
+  // lib/clinics/mutations.ts). @@unique enforces no collisions across tenants.
   voicePhone: optionalTrimmed(32),
-  // IANA tz name (e.g. "Asia/Karachi", "America/New_York"). We don't validate
-  // against the full list here — Postgres will accept the string; the
-  // scheduler treats unknown zones as UTC.
-  timezone: optionalTrimmed(64),
+  // IANA tz name (e.g. "Asia/Karachi", "America/New_York"). Validated as a real
+  // zone — an unknown zone is NOT silently treated as UTC; Intl throws on it.
+  timezone: optionalTrimmed(64).refine(
+    (v) => v === undefined || isValidTimeZone(v),
+    { message: "Enter a valid IANA timezone (e.g. Asia/Karachi)." },
+  ),
 });
 
 export type UpdateClinicInput = z.infer<typeof updateClinicSchema>;

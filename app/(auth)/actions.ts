@@ -3,10 +3,12 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { prisma } from "@/lib/prisma";
 import { registerSchema } from "@/lib/validations/auth";
 
-export type ActionResult = { error: string } | undefined;
+// `notice` is a non-error message the form surfaces (e.g. "check your email").
+export type ActionResult = { error?: string; notice?: string } | undefined;
 
 export async function login(formData: FormData): Promise<ActionResult> {
   const email = String(formData.get("email") ?? "").trim();
@@ -45,7 +47,9 @@ export async function register(formData: FormData): Promise<ActionResult> {
   const { data: authData, error: authError } = await supabase.auth.signUp({
     email,
     password,
-    options: { data: { full_name: fullName } },
+    // Stash clinic_name alongside full_name so the clinic can be provisioned
+    // later (e.g. after email confirmation) without re-collecting it.
+    options: { data: { full_name: fullName, clinic_name: clinicName } },
   });
 
   if (authError) {
@@ -53,13 +57,27 @@ export async function register(formData: FormData): Promise<ActionResult> {
   }
   if (!authData.user) {
     return {
+      error: "Sign-up failed. Please try again.",
+    };
+  }
+
+  // Supabase does NOT error on a duplicate email (that would leak which emails
+  // are registered). Instead it returns a user with an empty `identities`
+  // array. Detect that and give a real message instead of a confusing
+  // "setup failed" further down.
+  if ((authData.user.identities?.length ?? 0) === 0) {
+    return {
       error:
-        "Account created but no session — check your email to confirm, then log in.",
+        "An account with this email already exists. Try logging in instead.",
     };
   }
 
   const authUserId = authData.user.id;
 
+  // Provision the clinic + admin staff + AiSettings atomically. On ANY failure
+  // roll back the just-created auth user so we never strand a login with no
+  // clinic (which can neither sign in usefully nor re-register). Mirrors the
+  // rollback in lib/staff/mutations.ts.
   try {
     await prisma.$transaction(async (tx) => {
       // Only the clinic NAME is set at sign-up; contact details + timezone are
@@ -90,9 +108,27 @@ export async function register(formData: FormData): Promise<ActionResult> {
     });
   } catch (e) {
     console.error("Clinic provisioning failed for user", authUserId, e);
+    // Best-effort rollback of the orphaned auth user via the service-role
+    // client (the cookie client can't call auth.admin.*).
+    await createAdminClient()
+      .auth.admin.deleteUser(authUserId)
+      .catch(() => {
+        // If cleanup fails the user can't re-register; logged for support.
+        console.error("Failed to roll back auth user", authUserId);
+      });
     return {
-      error:
-        "Account created but clinic setup failed. Please contact support.",
+      error: "Couldn't finish setting up your account. Please try again.",
+    };
+  }
+
+  // If email confirmation is ON, signUp returns a user but NO session. Sending
+  // them to /onboarding would just bounce off the auth proxy — instead tell
+  // them to confirm first. The clinic is already provisioned, so once they
+  // confirm and log in everything is ready.
+  if (!authData.session) {
+    return {
+      notice:
+        "Account created! Check your email to confirm, then log in to finish setup.",
     };
   }
 

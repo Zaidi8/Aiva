@@ -9,10 +9,15 @@
 import type { NextRequest } from "next/server";
 
 import { withApiStaff } from "@/lib/api/with-staff";
-import { ok, failNotFound, failValidation } from "@/lib/api/response";
+import {
+  ok,
+  failNotFound,
+  failValidation,
+  failConflict,
+} from "@/lib/api/response";
 import { mapPrismaError } from "@/lib/api/prisma-errors";
 import { getClinic } from "@/lib/clinics/queries";
-import { updateClinic } from "@/lib/clinics/mutations";
+import { updateClinic, GoLiveNotReadyError } from "@/lib/clinics/mutations";
 import { updateClinicSchema } from "@/lib/validations/clinic";
 
 export const runtime = "nodejs";
@@ -31,6 +36,7 @@ export const PATCH = withApiStaff(async (req: NextRequest, _ctx, staff) => {
     const clinic = await updateClinic(staff, parsed.data);
     return ok(clinic);
   } catch (e) {
+    if (e instanceof GoLiveNotReadyError) return failConflict(e.message);
     const mapped = mapPrismaError(e);
     if (mapped) return mapped;
     throw e;

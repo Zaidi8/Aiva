@@ -25,7 +25,14 @@ export function LoginPage() {
   const handleRegister = (formData: FormData) => {
     startTransition(async () => {
       const result = await register(formData);
-      if (result?.error) toast.error(result.error);
+      if (result?.error) {
+        toast.error(result.error);
+      } else if (result?.notice) {
+        // Email-confirmation flow: no redirect happens, so surface the notice
+        // and flip back to the login tab for when they return.
+        toast.success(result.notice, { duration: 8000 });
+        setIsLogin(true);
+      }
     });
   };
 

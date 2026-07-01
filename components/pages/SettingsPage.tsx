@@ -22,7 +22,7 @@ import { toast } from 'sonner';
 import { useState, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { useRouter } from 'next/navigation';
-import { User, Bell, Lock, Bot, Palette, Save } from 'lucide-react';
+import { User, Bell, Lock, Bot, Palette, Save, AlertTriangle } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../ui/card';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
@@ -63,6 +63,9 @@ interface SettingsPageProps {
   initialStaff: InitialStaff;
   initialClinic: InitialClinic;
   initialAiSettings: InitialAiSettings;
+  // False when the clinic has no active doctor with a schedule — used to warn
+  // if the AI voice number is set but nothing is bookable yet.
+  voiceGoLiveReady: boolean;
 }
 
 interface ProfileFormValues {
@@ -89,6 +92,7 @@ export function SettingsPage({
   initialStaff,
   initialClinic,
   initialAiSettings,
+  voiceGoLiveReady,
 }: SettingsPageProps) {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState(initialTab);
@@ -426,6 +430,17 @@ export function SettingsPage({
 
                     <div className="space-y-2">
                       <Label htmlFor="clinicVoicePhone">Voice Phone (inbound AI number)</Label>
+                      {initialClinic.voicePhone && !voiceGoLiveReady && (
+                        <div className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                          <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                          <span>
+                            Your AI number is set, but no doctor has working
+                            hours yet — the receptionist can answer calls but
+                            can’t book anyone. Add a doctor and set their
+                            schedule to go fully live.
+                          </span>
+                        </div>
+                      )}
                       <Input
                         id="clinicVoicePhone"
                         placeholder="e.g. +1 555 0100"
