@@ -19,7 +19,7 @@
 // when the voice runtime writes to it. We parse it defensively — older or
 // partially-completed rows may have an empty array or null.
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Bot,
@@ -53,10 +53,13 @@ import { ScrollArea } from '../ui/scroll-area';
 import { TopBar } from '../ui/TopBar';
 import { StatsBar } from '../ui/StatsBar';
 import { motion, AnimatePresence } from 'motion/react';
-import { apiGet } from '@/lib/client/fetcher';
 
 interface AIReceptionistPageProps {
-  onNavigate?: (page: string) => void;
+  // Server-fetched by app/(dashboard)/ai-receptionist/page.tsx and passed as
+  // initial state — no client fetch-on-mount, so the route's loading.tsx
+  // skeleton streams while the server reads the data.
+  initialCalls: ApiCallLog[];
+  initialSummary: DashboardSummary;
 }
 
 interface ApiCallLog {
@@ -70,11 +73,6 @@ interface ApiCallLog {
   startedAt: string;
   endedAt: string | null;
   patient: { id: string; fullName: string } | null;
-}
-
-interface CallsPayload {
-  items: ApiCallLog[];
-  total: number;
 }
 
 interface DashboardSummary {
@@ -161,43 +159,20 @@ function intentLabel(intent: ApiCallLog['detectedIntent']): string {
 }
 
 export function AIReceptionistPage({
-  onNavigate: _onNavigate,
+  initialCalls,
+  initialSummary,
 }: AIReceptionistPageProps) {
-  void _onNavigate;
   const router = useRouter();
-  const [calls, setCalls] = useState<ApiCallLog[]>([]);
-  const [summary, setSummary] = useState<DashboardSummary | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [calls] = useState<ApiCallLog[]>(initialCalls);
+  const [summary] = useState<DashboardSummary | null>(initialSummary);
+  // Data arrives as props (server-rendered), so there's no client loading/error
+  // state — the route-level loading.tsx handles the pending UI. A router.refresh()
+  // re-runs the server component to pull fresh calls.
+  const loading = false;
+  const error: string | null = null;
   const [selectedCallId, setSelectedCallId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [outcomeFilter, setOutcomeFilter] = useState('all');
-
-  useEffect(() => {
-    // loading defaults to true; error defaults to null. We avoid the redundant
-    // synchronous setState here so the react-hooks/set-state-in-effect rule
-    // doesn't flag this legitimate fetch-on-mount.
-    let cancelled = false;
-    Promise.all([
-      apiGet<CallsPayload>('/api/calls?take=50'),
-      apiGet<DashboardSummary>('/api/dashboard-summary'),
-    ])
-      .then(([callsRes, summaryRes]) => {
-        if (cancelled) return;
-        setCalls(callsRes.items);
-        setSummary(summaryRes);
-      })
-      .catch((e) => {
-        if (cancelled) return;
-        setError(e instanceof Error ? e.message : 'Failed to load calls.');
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [router]);
 
   const filteredCalls = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();

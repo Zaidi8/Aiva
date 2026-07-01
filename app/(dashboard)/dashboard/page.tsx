@@ -1,18 +1,47 @@
-'use client';
+// Server-rendered shell for the Dashboard. Reads the summary + today's
+// appointments server-side (sequentially — the pooled DB is connection_limit=1)
+// and passes them to the client page as initial state. dashboard/loading.tsx
+// streams a layout-matched skeleton while these run.
 
+import { requireStaff } from '@/lib/auth';
+import { getDashboardSummary } from '@/lib/dashboard/queries';
+import { listAppointments } from '@/lib/appointments/queries';
 import { DashboardPage } from '@/components/pages/DashboardPage';
-import { useRouter } from 'next/navigation';
 
-export default function DashboardRoute() {
-  const router = useRouter();
+function todayUtcBounds() {
+  const now = new Date();
+  const from = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+  );
+  const to = new Date(from.getTime() + 24 * 60 * 60 * 1000 - 1);
+  return { from, to };
+}
 
-  const handleNavigate = (page: string, subPage?: string) => {
-    if (page === 'settings' && subPage) {
-      router.push(`/settings?tab=${subPage}`);
-    } else {
-      router.push(`/${page}`);
-    }
-  };
+export default async function DashboardRoute() {
+  const staff = await requireStaff();
+  const { from, to } = todayUtcBounds();
 
-  return <DashboardPage onNavigate={handleNavigate} />;
+  const summary = await getDashboardSummary(staff);
+  const appts = await listAppointments(staff, { from, to, take: 4 });
+
+  const initialTodayAppts = appts.items.slice(0, 4).map((a) => ({
+    id: a.id,
+    scheduledAt: a.scheduledAt.toISOString(),
+    status: a.status,
+    type: a.type,
+    patient: {
+      id: a.patient.id,
+      fullName: a.patient.fullName,
+      phoneNumber: a.patient.phoneNumber,
+    },
+    doctor: {
+      id: a.doctor.id,
+      name: a.doctor.name,
+      specialization: a.doctor.specialization,
+    },
+  }));
+
+  return (
+    <DashboardPage initialSummary={summary} initialTodayAppts={initialTodayAppts} />
+  );
 }

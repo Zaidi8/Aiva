@@ -10,7 +10,7 @@
 // We drop the previous static literal cards (1,284 patients / 18.7% growth)
 // and the Performance Metrics card whose values were entirely fabricated.
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { TrendingUp, Users, Calendar, Activity, Download } from 'lucide-react';
 import {
   Card,
@@ -63,7 +63,9 @@ interface AnalyticsPayload {
 }
 
 interface AnalyticsPageProps {
-  onNavigate?: (page: string) => void;
+  // Server-fetched default-range payload from the route shell. Switching range
+  // refetches client-side (stale-while-revalidate) without a full navigation.
+  initialData: AnalyticsPayload;
 }
 
 const RANGE_OPTIONS: { value: AnalyticsRange; label: string }[] = [
@@ -78,20 +80,21 @@ function formatPct(n: number): string {
   return `${sign}${n.toFixed(1)}%`;
 }
 
-export function AnalyticsPage({
-  onNavigate: _onNavigate,
-}: AnalyticsPageProps) {
-  void _onNavigate;
-  const [range, setRange] = useState<AnalyticsRange>('this-month');
-  const [data, setData] = useState<AnalyticsPayload | null>(null);
-  const [loading, setLoading] = useState(true);
+export function AnalyticsPage({ initialData }: AnalyticsPageProps) {
+  const [range, setRange] = useState<AnalyticsRange>(initialData.range);
+  const [data, setData] = useState<AnalyticsPayload | null>(initialData);
   const [error, setError] = useState<string | null>(null);
+  const didMount = useRef(false);
 
   useEffect(() => {
-    // loading defaults to true on first mount, and on subsequent range
-    // changes we let the next .then() flip it. We don't pre-set loading here
-    // (which would trigger react-hooks/set-state-in-effect); the brief stale
-    // data while refetching is fine since the cards just show the old values.
+    // Initial render already has server-fetched data for the default range —
+    // skip that first run. Only a user-initiated range change refetches, and
+    // it's stale-while-revalidate (the old cards stay until fresh data lands),
+    // so there's no synchronous setState here and no loading flash.
+    if (!didMount.current) {
+      didMount.current = true;
+      return;
+    }
     let cancelled = false;
     apiGet<AnalyticsPayload>(`/api/analytics?range=${range}`)
       .then((res) => {
@@ -102,9 +105,6 @@ export function AnalyticsPage({
       .catch((e) => {
         if (cancelled) return;
         setError(e instanceof Error ? e.message : 'Failed to load analytics.');
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
       });
     return () => {
       cancelled = true;
@@ -231,9 +231,7 @@ export function AnalyticsPage({
                     )}
                   </div>
                   <p className="text-sm text-gray-600 mb-1">{metric.label}</p>
-                  <p className="text-3xl text-[#333333]">
-                    {loading ? '…' : metric.value}
-                  </p>
+                  <p className="text-3xl text-[#333333]">{metric.value}</p>
                 </CardContent>
               </Card>
             </motion.div>

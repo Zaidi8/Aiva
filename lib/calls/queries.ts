@@ -12,10 +12,17 @@ export interface ListCallsOptions {
   skip?: number;
 }
 
+// Shape mirrors the `include` below so server callers get typed relations
+// instead of a bare CallLog (the /api/calls JSON already carried these).
+export type CallLogListItem = CallLog & {
+  patient: { id: string; fullName: string } | null;
+  appointment: { id: string; scheduledAt: Date } | null;
+};
+
 export async function listCalls(
   staff: Pick<ClinicStaff, "clinicId">,
   opts: ListCallsOptions = {},
-): Promise<{ items: CallLog[]; total: number }> {
+): Promise<{ items: CallLogListItem[]; total: number }> {
   const where = {
     ...clinicWhere(staff),
     ...(opts.from || opts.to

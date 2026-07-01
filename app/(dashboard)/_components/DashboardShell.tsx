@@ -1,7 +1,7 @@
 'use client';
 
 import { NewSidebar, type SidebarUserProfile } from '@/components/layout/NewSidebar';
-import { useRouter, usePathname } from 'next/navigation';
+import { usePathname } from 'next/navigation';
 import type { PageType } from '@/types';
 
 export function DashboardShell({
@@ -11,9 +11,10 @@ export function DashboardShell({
   userProfile: SidebarUserProfile;
   children: React.ReactNode;
 }) {
-  const router = useRouter();
   const pathname = usePathname();
 
+  // Active-nav highlight derives from the URL; the sidebar itself navigates via
+  // <Link> (prefetched), so the persistent shell never re-renders on nav.
   const getCurrentPage = (): string => {
     if (pathname.includes('/dashboard')) return 'dashboard';
     if (pathname.includes('/appointments')) return 'appointments';
@@ -27,19 +28,10 @@ export function DashboardShell({
     return 'dashboard';
   };
 
-  const handleNavigate = (page: string, subPage?: string) => {
-    if (page === 'settings' && subPage) {
-      router.push(`/settings?tab=${subPage}`);
-    } else {
-      router.push(`/${page}`);
-    }
-  };
-
   return (
     <div className="flex h-screen bg-[#F7F9FB]">
       <NewSidebar
         currentPage={getCurrentPage() as PageType}
-        onNavigate={handleNavigate as (page: PageType, subPage?: string) => void}
         userProfile={userProfile}
       />
       <main className="flex-1 overflow-y-auto">{children}</main>

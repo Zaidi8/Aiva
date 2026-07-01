@@ -16,8 +16,12 @@ import {
   ChevronRight,
   User,
 } from "lucide-react";
+import Link from "next/link";
 import type { PageType } from "@/types";
 import { AivaLogo } from "../ui/AivaLogo";
+
+// Every nav item maps 1:1 to a top-level route.
+const hrefFor = (id: PageType) => `/${id}`;
 import { motion, AnimatePresence } from "motion/react";
 import {
   DropdownMenu,
@@ -42,7 +46,6 @@ export interface SidebarUserProfile {
 
 interface SidebarProps {
   currentPage: PageType;
-  onNavigate: (page: PageType, subPage?: string) => void;
   userProfile: SidebarUserProfile;
 }
 
@@ -104,7 +107,6 @@ const bottomMenuItems = [
 
 export function NewSidebar({
   currentPage,
-  onNavigate,
   userProfile,
 }: SidebarProps) {
   const [isMobileMenuOpen, setIsMobileMenuOpen] =
@@ -200,13 +202,11 @@ export function NewSidebar({
               const isActive = currentPage === item.id;
               return (
                 <li key={item.id}>
-                  <motion.button
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
-                    onClick={() => {
-                      onNavigate(item.id);
-                      setIsMobileMenuOpen(false);
-                    }}
+                  <Link
+                    href={hrefFor(item.id)}
+                    prefetch
+                    onClick={() => setIsMobileMenuOpen(false)}
+                    aria-current={isActive ? "page" : undefined}
                     className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all ${
                       isActive
                         ? "bg-gradient-to-r from-[#2F80ED] to-[#56CCF2] text-white shadow-md"
@@ -230,7 +230,7 @@ export function NewSidebar({
                         </motion.span>
                       )}
                     </AnimatePresence>
-                  </motion.button>
+                  </Link>
                 </li>
               );
             })}
@@ -244,14 +244,12 @@ export function NewSidebar({
             const Icon = item.icon;
             const isActive = currentPage === item.id;
             return (
-              <motion.button
+              <Link
                 key={item.id}
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-                onClick={() => {
-                  onNavigate(item.id);
-                  setIsMobileMenuOpen(false);
-                }}
+                href={hrefFor(item.id)}
+                prefetch
+                onClick={() => setIsMobileMenuOpen(false)}
+                aria-current={isActive ? "page" : undefined}
                 className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all ${
                   isActive
                     ? "bg-gradient-to-r from-[#2F80ED] to-[#56CCF2] text-white shadow-md"
@@ -272,7 +270,7 @@ export function NewSidebar({
                     </motion.span>
                   )}
                 </AnimatePresence>
-              </motion.button>
+              </Link>
             );
           })}
 
@@ -326,13 +324,11 @@ export function NewSidebar({
                 </p>
               </div>
               <DropdownMenuSeparator />
-              <DropdownMenuItem
-                onClick={() =>
-                  onNavigate("settings", "profile")
-                }
-              >
-                <User className="w-4 h-4 mr-2" />
-                Profile Settings
+              <DropdownMenuItem asChild>
+                <Link href="/settings?tab=profile">
+                  <User className="w-4 h-4 mr-2" />
+                  Profile Settings
+                </Link>
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <form action={signout}>

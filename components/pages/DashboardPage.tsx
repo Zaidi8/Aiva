@@ -1,13 +1,12 @@
 'use client';
 
-// Dashboard page — sources stat tiles from /api/dashboard-summary and the
-// "Today's Appointments" list from /api/appointments?from=…&to=… for the
-// current UTC day. Both fetches run in parallel on mount; the AI tile values
-// (Calls Handled / Bookings / Success Rate) reuse the same dashboard-summary
-// payload so we don't issue extra round-trips.
+// Dashboard page (client component). Stat tiles + today's appointments are
+// server-fetched by the route shell (app/(dashboard)/dashboard/page.tsx) and
+// passed in as initial props — no client fetch-on-mount. router.refresh() after
+// a mutation re-runs the server component to pull fresh data.
 
 import { toast } from 'sonner';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Calendar,
@@ -28,10 +27,13 @@ import { motion } from 'motion/react';
 import { useNotificationSound } from '../../hooks/useNotificationSound';
 import { AppointmentToast } from '../ui/AppointmentToast';
 import { OnboardingChecklist } from '../ui/OnboardingChecklist';
-import { apiGet } from '@/lib/client/fetcher';
 
 interface DashboardPageProps {
-  onNavigate?: (page: string, subPage?: string) => void;
+  // Server-fetched by the route shell (summary + today's appointments), passed
+  // as initial state so there's no client fetch-on-mount waterfall. The route's
+  // loading.tsx streams a skeleton while the server reads run.
+  initialSummary: DashboardSummary;
+  initialTodayAppts: ApiAppointment[];
 }
 
 interface DashboardSummary {
@@ -57,18 +59,6 @@ interface ApiAppointment {
   doctor: { id: string; name: string; specialization: string };
 }
 
-function todayUtcBounds() {
-  const now = new Date();
-  const from = new Date(
-    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
-  );
-  const to = new Date(from.getTime() + 24 * 60 * 60 * 1000 - 1);
-  return {
-    from: from.toISOString(),
-    to: to.toISOString(),
-  };
-}
-
 function formatTime(iso: string): string {
   const d = new Date(iso);
   return d.toLocaleTimeString('en-US', {
@@ -92,42 +82,27 @@ function statusBadgeClass(status: ApiAppointment['status']): string {
   }
 }
 
-export function DashboardPage({ onNavigate }: DashboardPageProps) {
+export function DashboardPage({
+  initialSummary,
+  initialTodayAppts,
+}: DashboardPageProps) {
   const router = useRouter();
   const [isNewAppointmentModalOpen, setIsNewAppointmentModalOpen] =
     useState(false);
-  const [summary, setSummary] = useState<DashboardSummary | null>(null);
-  const [todayAppts, setTodayAppts] = useState<ApiAppointment[]>([]);
-  const [loading, setLoading] = useState(true);
+  const summary = initialSummary;
+  const todayAppts = initialTodayAppts;
   const { playNotificationSound } = useNotificationSound();
 
-  useEffect(() => {
-    // loading defaults to true — skip a redundant setLoading(true) so the
-    // react-hooks/set-state-in-effect lint stays clean.
-    let cancelled = false;
-    const { from, to } = todayUtcBounds();
-    Promise.all([
-      apiGet<DashboardSummary>('/api/dashboard-summary'),
-      apiGet<{ items: ApiAppointment[]; total: number }>(
-        `/api/appointments?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&take=4`,
-      ),
-    ])
-      .then(([s, a]) => {
-        if (cancelled) return;
-        setSummary(s);
-        setTodayAppts(a.items.slice(0, 4));
-      })
-      .catch(() => {
-        // Soft-fail: tiles render zeros, list shows empty state. The user
-        // already sees the page; we don't want to block the chrome.
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  // Navigation for the in-page CTAs. Mirrors the old onNavigate the client
+  // route shell used to inject — now that the shell is a server component, the
+  // page routes itself.
+  const handleNavigate = (page: string, subPage?: string) => {
+    if (page === 'settings' && subPage) {
+      router.push(`/settings?tab=${subPage}`);
+    } else {
+      router.push(`/${page}`);
+    }
+  };
 
   const handleTestNotification = () => {
     playNotificationSound();
@@ -215,7 +190,7 @@ export function DashboardPage({ onNavigate }: DashboardPageProps) {
             patientCount={summary.patientCount}
             staffCount={summary.staffCount}
             aiConfigured={summary.aiConfigured}
-            onNavigate={onNavigate}
+            onNavigate={handleNavigate}
           />
         )}
 
@@ -251,7 +226,7 @@ export function DashboardPage({ onNavigate }: DashboardPageProps) {
                   variant="secondary"
                   size="sm"
                   className="bg-white/20 hover:bg-white/30 text-white border-white/30"
-                  onClick={() => onNavigate?.('ai-receptionist')}
+                  onClick={() => handleNavigate('ai-receptionist')}
                 >
                   View Details
                   <ArrowRight className="w-4 h-4 ml-2" />
@@ -292,7 +267,7 @@ export function DashboardPage({ onNavigate }: DashboardPageProps) {
               variant="outline"
               size="sm"
               className="hover:bg-[#2F80ED] hover:text-white transition-all"
-              onClick={() => onNavigate?.('appointments')}
+              onClick={() => handleNavigate('appointments')}
             >
               View All
               <ArrowRight className="w-4 h-4 ml-2" />
@@ -304,7 +279,7 @@ export function DashboardPage({ onNavigate }: DashboardPageProps) {
               <CardContent className="p-12 text-center">
                 <Calendar className="w-16 h-16 text-gray-300 mx-auto mb-4" />
                 <h3 className="text-xl text-gray-600 mb-2">
-                  {loading ? 'Loading...' : 'No Appointments Today'}
+                  No Appointments Today
                 </h3>
                 <p className="text-gray-500 mb-6">
                   No appointments are scheduled for today. Add a new appointment
@@ -390,13 +365,13 @@ export function DashboardPage({ onNavigate }: DashboardPageProps) {
                 label: 'View Calendar',
                 icon: Calendar,
                 gradient: 'from-[#56CCF2] to-[#27AE60]',
-                action: () => onNavigate?.('appointments'),
+                action: () => handleNavigate('appointments'),
               },
               {
                 label: 'AI Settings',
                 icon: Bot,
                 gradient: 'from-[#27AE60] to-[#2F80ED]',
-                action: () => onNavigate?.('settings', 'ai'),
+                action: () => handleNavigate('settings', 'ai'),
               },
             ].map((action, index) => (
               <motion.div
