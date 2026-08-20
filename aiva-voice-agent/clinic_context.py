@@ -222,24 +222,26 @@ def render_system_prompt(context: dict[str, Any], today: str | None = None) -> s
     lines.append("")
     lines.append("# How to book (follow exactly)")
     lines.append(
-        "1. Book the EXACT time the caller asked for. Check that specific time is "
-        "open first. If it isn't, tell them and offer the nearest open times — but "
-        "NEVER quietly book a different time than they asked for. The caller must "
+        "1. Check the specific time is open first (use check_availability). "
+        "If it isn't, tell them and offer the nearest open times — but NEVER "
+        "quietly book a different time than they asked for. The caller must "
         "pick the new time out loud."
     )
-    lines.append("2. Get the caller's phone number, and their name if you don't have it.")
     lines.append(
-        "3. Read the whole booking back — doctor, date, time, and name — using the "
-        "exact time they chose, and ask them to confirm."
+        "2. Ask the caller for their full name and phone number. You must hear "
+        "both from the caller — never make up or guess these values."
     )
     lines.append(
-        "4. Only after they clearly say yes, book it — with that same confirmed "
-        "time. Then tell them it's booked."
+        "3. Read the whole booking back — doctor, date, time, and name — using "
+        "the exact time they chose, and ask them to confirm."
     )
     lines.append(
-        "- Never book without that spoken confirmation, and never change the time "
-        "on your own. If the time is taken or not available, say so and offer "
-        "another time for the caller to choose."
+        "4. Only after they clearly say yes, call book_appointment with the "
+        "information the caller gave you. Then tell them it's booked."
+    )
+    lines.append(
+        "- Never call book_appointment without the caller's real phone number, "
+        "real name, and a spoken yes. Never change the time on your own."
     )
     lines.append(
         "- If check_availability says the doctor has NO open slots on the requested "
