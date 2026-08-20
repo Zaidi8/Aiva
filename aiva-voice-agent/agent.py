@@ -4,7 +4,7 @@ A LiveKit Agents worker that wires:
   - Silero VAD
   - LiveKit turn-detector (English)
   - Groq Whisper Large v3 Turbo (STT)
-  - Groq llama-3.1-8b-instant (LLM)
+  - Groq openai/gpt-oss-120b (LLM)
   - ElevenLabs TTS (Sarah)
 
 Phase 2 adds: per-call clinic-context fetch from the Next.js app, rendered
@@ -232,28 +232,25 @@ async def entrypoint(ctx: JobContext) -> None:
         greeting = FALLBACK_GREETING
 
     stt = groq.STT(model="whisper-large-v3-turbo", language="en")
-    # llama-3.3-70b-versatile is Groq's strong tool-caller. The earlier
-    # llama-3.1-8b-instant was a weak tool-caller: under tool pressure it leaked
-    # malformed tool-call TEXT (e.g. "function check_availability…") into the
-    # spoken stream instead of emitting a real function call, and burned the turn
-    # without producing an answer ("said 'function' and never responded"). The
-    # 70b model emits proper tool calls and follows the booking protocol better.
+    # openai/gpt-oss-120b is Groq's strongest tool-caller as of Aug 2026.
+    # Earlier models (llama-3.3-70b-versatile, meta-llama/llama-4-scout) were
+    # decommissioned by Groq and now return HTTP 400 (model_not_found), which
+    # the FallbackAdapter does NOT catch (it only retries on 429). The fallback
+    # defaults to openai/gpt-oss-20b (low latency, own token bucket).
     # temperature kept low for instruction-following on a phone call.
     #
     # Phase 8: wrap the primary in a FallbackAdapter with a SECOND model. Groq's
-    # free-tier rate limits are PER MODEL, so when 70b returns a 429 (which kept
-    # killing test calls) the adapter fails over mid-turn to the backup model's
-    # own token bucket and the caller still gets an answer. The backup defaults to
-    # llama-3.1-8b-instant (same family, low latency, and our tts_node sanitizer
-    # already scrubs its tool-call-text leaks); override via AIVA_FALLBACK_MODEL.
-    # If BOTH are exhausted, the APIError reaches AivaAgent.llm_node, which speaks
-    # the graceful fallback line instead of going silent (Phase 7).
+    # free-tier rate limits are PER MODEL, so when the primary returns a 429 the
+    # adapter fails over mid-turn to the backup model's own token bucket and the
+    # caller still gets an answer. If BOTH are exhausted, the APIError reaches
+    # AivaAgent.llm_node, which speaks the graceful fallback line instead of
+    # going silent (Phase 7).
     # Both models are env-overridable so a drained per-model Groq budget can be
     # sidestepped for testing WITHOUT a code change — e.g. set
     # AIVA_PRIMARY_MODEL=openai/gpt-oss-20b (its own fresh token bucket) and
     # restart the worker. Defaults are the tuned production pair.
-    primary_model = os.environ.get("AIVA_PRIMARY_MODEL", "llama-3.3-70b-versatile")
-    fallback_model = os.environ.get("AIVA_FALLBACK_MODEL", "llama-3.1-8b-instant")
+    primary_model = os.environ.get("AIVA_PRIMARY_MODEL", "openai/gpt-oss-120b")
+    fallback_model = os.environ.get("AIVA_FALLBACK_MODEL", "openai/gpt-oss-20b")
     llm = FallbackAdapter(
         [
             groq.LLM(model=primary_model, temperature=0.3),

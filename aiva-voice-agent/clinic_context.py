@@ -165,12 +165,22 @@ def render_system_prompt(context: dict[str, Any], today: str | None = None) -> s
                      "doctor, say you don't have that information and a human "
                      "teammate will follow up.")
     else:
-        # Phase 3: only names + specializations here. Day/time availability is
-        # answered by the check_availability tool, not baked into the prompt.
         for d in doctors:
             name = d.get("name", "Unknown")
             spec = d.get("specialization")
-            lines.append(f"- {name}" + (f" — {spec}" if spec else ""))
+            sched_parts = []
+            for s in d.get("schedule") or []:
+                day = s.get("dayName", "")
+                start = s.get("startTime", "")
+                end = s.get("endTime", "")
+                if day and start and end:
+                    sched_parts.append(f"{day[:3]} {start}–{end}")
+            sched_str = ""
+            if sched_parts:
+                sched_str = f" (works: {', '.join(sched_parts)})"
+            lines.append(
+                f"- {name}" + (f" — {spec}" if spec else "") + sched_str
+            )
     lines.append("")
 
     lines.append("# How you speak")
@@ -187,6 +197,12 @@ def render_system_prompt(context: dict[str, Any], today: str | None = None) -> s
             "(\"tomorrow\", \"next Monday\", \"the 14th\") to an exact YYYY-MM-DD "
             "yourself before using a tool — the tools only accept YYYY-MM-DD."
         )
+    lines.append(
+        "- Look at each doctor's working days above BEFORE calling check_availability. "
+        "If the caller asks for a day the doctor doesn't work, tell them immediately "
+        "which days the doctor IS available and ask them to pick a different day — "
+        "don't waste a tool call on a day you already know has zero slots."
+    )
     lines.append(
         "- You have tools to look things up and to book. Use them SILENTLY: never "
         "say the word \"function\" or \"tool\", never read out a tool name or its "
@@ -225,7 +241,14 @@ def render_system_prompt(context: dict[str, Any], today: str | None = None) -> s
         "on your own. If the time is taken or not available, say so and offer "
         "another time for the caller to choose."
     )
+    lines.append(
+        "- If check_availability says the doctor has NO open slots on the requested "
+        "date, that means they don't work that day. Tell the caller which days that "
+        "doctor IS available (from the schedule shown above) and ask them to pick a "
+        "different day. Do NOT try other times on the same day — there are none."
+    )
     lines.append("")
+
     lines.append("# How to cancel or reschedule (follow exactly)")
     lines.append(
         "1. First look the appointment up by the caller's phone number, and "
