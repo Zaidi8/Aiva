@@ -12,14 +12,9 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { TrendingUp, Users, Calendar, Activity, Download } from 'lucide-react';
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-  CardDescription,
-} from '../ui/card';
 import { Button } from '../ui/button';
+import { StatCard } from '../ui/stat-card';
+import { SectionCard } from '../ui/section-card';
 import { TopBar } from '../ui/TopBar';
 import {
   Select,
@@ -28,7 +23,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '../ui/select';
-import { motion } from 'motion/react';
 import {
   LineChart,
   Line,
@@ -75,6 +69,17 @@ const RANGE_OPTIONS: { value: AnalyticsRange; label: string }[] = [
   { value: 'this-year', label: 'This Year' },
 ];
 
+// Concrete hex pulled from the design tokens in globals.css — recharts renders
+// SVG and can't resolve CSS custom properties, so the series colors are kept in
+// sync with --primary / --success / --destructive / --brand-teal by hand.
+const CHART = {
+  primary: '#4f46e5', // indigo — brand primary
+  success: '#059669', // emerald — completed / confirmed
+  destructive: '#dc2626', // red — cancelled
+  grid: '#e2e8f0', // slate-200 — gridlines
+  axis: '#64748b', // slate-500 — axis labels
+} as const;
+
 function formatPct(n: number): string {
   const sign = n >= 0 ? '+' : '';
   return `${sign}${n.toFixed(1)}%`;
@@ -118,60 +123,62 @@ export function AnalyticsPage({ initialData }: AnalyticsPageProps) {
     growthRatePct: 0,
   };
 
+  const rangeLabel = data
+    ? (RANGE_OPTIONS.find((r) => r.value === data.range)?.label ?? '')
+    : '';
+
   const metricCards = [
     {
-      label: 'Total Patients',
+      label: 'Total patients',
       value: totals.totalPatients,
-      icon: Users,
-      color: '#2F80ED',
+      icon: <Users />,
+      accent: 'primary' as const,
       hint: 'All-time',
     },
     {
       label: 'Appointments (range)',
       value: totals.appointmentsInRange,
-      icon: Calendar,
-      color: '#56CCF2',
-      hint: data ? RANGE_OPTIONS.find((r) => r.value === data.range)?.label : '',
+      icon: <Calendar />,
+      accent: 'info' as const,
+      hint: rangeLabel,
     },
     {
       label: 'Completed (range)',
       value: totals.completedInRange,
-      icon: Activity,
-      color: '#27AE60',
-      hint: data ? RANGE_OPTIONS.find((r) => r.value === data.range)?.label : '',
+      icon: <Activity />,
+      accent: 'success' as const,
+      hint: rangeLabel,
     },
     {
       label: 'Growth vs prev',
       value: formatPct(totals.growthRatePct),
-      icon: TrendingUp,
-      color: totals.growthRatePct >= 0 ? '#27AE60' : '#EB5757',
-      hint: 'Appointments',
+      icon: <TrendingUp />,
+      accent: (totals.growthRatePct >= 0 ? 'success' : 'destructive') as
+        | 'success'
+        | 'destructive',
+      hint: 'vs previous period',
     },
   ];
 
   return (
-    <div className="min-h-screen bg-[#F7F9FB]">
+    <div>
       <TopBar
         title="Analytics & Reports"
         description="Comprehensive insights into clinic performance"
       />
 
-      <div className="p-8 max-w-7xl mx-auto space-y-8">
+      <div className="mx-auto max-w-7xl space-y-6 p-6">
         {/* Filters */}
-        <motion.div
-          initial={{ y: -20, opacity: 0 }}
-          animate={{ y: 0, opacity: 1 }}
-          className="flex flex-col sm:flex-row gap-4 bg-white p-4 rounded-xl shadow-sm"
-        >
-          <div className="flex-1">
-            <label className="text-sm text-gray-600 mb-2 block">
-              Time Range
-            </label>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium text-muted-foreground">
+              Time range
+            </span>
             <Select
               value={range}
               onValueChange={(v) => setRange(v as AnalyticsRange)}
             >
-              <SelectTrigger className="w-full">
+              <SelectTrigger className="w-44">
                 <SelectValue placeholder="Select time range" />
               </SelectTrigger>
               <SelectContent>
@@ -183,162 +190,148 @@ export function AnalyticsPage({ initialData }: AnalyticsPageProps) {
               </SelectContent>
             </Select>
           </div>
-          <div className="flex items-end">
-            <Button
-              variant="outline"
-              className="w-full sm:w-auto"
-              disabled
-              title="Export not implemented yet"
-            >
-              <Download className="w-4 h-4 mr-2" />
-              Export Report
-            </Button>
-          </div>
-        </motion.div>
+          <Button
+            variant="outline"
+            disabled
+            title="Export not implemented yet"
+          >
+            <Download />
+            Export report
+          </Button>
+        </div>
 
         {error && (
-          <div className="rounded-md border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700">
+          <div className="rounded-lg border border-destructive/30 bg-destructive-muted px-4 py-3 text-sm text-destructive-muted-foreground">
             {error}
           </div>
         )}
 
         {/* Key Metrics */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-          {metricCards.map((metric, index) => (
-            <motion.div
-              key={index}
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              transition={{ delay: index * 0.1 }}
-              whileHover={{ scale: 1.05, y: -5 }}
-            >
-              <Card className="hover:shadow-lg transition-all cursor-pointer border-none">
-                <CardContent className="p-6">
-                  <div className="flex items-center justify-between mb-4">
-                    <div
-                      className="w-12 h-12 rounded-xl flex items-center justify-center"
-                      style={{ backgroundColor: `${metric.color}15` }}
-                    >
-                      <metric.icon
-                        className="w-6 h-6"
-                        style={{ color: metric.color }}
-                      />
-                    </div>
-                    {metric.hint && (
-                      <span className="text-xs text-gray-500">
-                        {metric.hint}
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-sm text-gray-600 mb-1">{metric.label}</p>
-                  <p className="text-3xl text-[#333333]">{metric.value}</p>
-                </CardContent>
-              </Card>
-            </motion.div>
+        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
+          {metricCards.map((metric) => (
+            <StatCard
+              key={metric.label}
+              label={metric.label}
+              value={metric.value}
+              icon={metric.icon}
+              accent={metric.accent}
+              hint={metric.hint}
+            />
           ))}
         </div>
 
         {/* Charts */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
           {/* Monthly Appointments Chart */}
-          <motion.div
-            initial={{ y: 20, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            transition={{ delay: 0.4 }}
+          <SectionCard
+            title="Monthly appointment trends"
+            description="Appointment statistics over the past 6 months"
           >
-            <Card className="hover:shadow-lg transition-shadow">
-              <CardHeader>
-                <CardTitle>Monthly Appointment Trends</CardTitle>
-                <CardDescription>
-                  Appointment statistics over the past 6 months
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <ResponsiveContainer width="100%" height={300}>
-                  <LineChart data={data?.monthly ?? []}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                    <XAxis dataKey="month" stroke="#999" />
-                    <YAxis stroke="#999" allowDecimals={false} />
-                    <Tooltip
-                      contentStyle={{
-                        backgroundColor: 'white',
-                        border: '1px solid #e0e0e0',
-                        borderRadius: '8px',
-                      }}
-                    />
-                    <Legend />
-                    <Line
-                      type="monotone"
-                      dataKey="appointments"
-                      stroke="#2F80ED"
-                      strokeWidth={3}
-                      dot={{ fill: '#2F80ED', r: 5 }}
-                      name="Total Appointments"
-                    />
-                    <Line
-                      type="monotone"
-                      dataKey="completed"
-                      stroke="#27AE60"
-                      strokeWidth={3}
-                      dot={{ fill: '#27AE60', r: 5 }}
-                      name="Completed"
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
-              </CardContent>
-            </Card>
-          </motion.div>
+            <ResponsiveContainer width="100%" height={300}>
+              <LineChart data={data?.monthly ?? []}>
+                <CartesianGrid strokeDasharray="3 3" stroke={CHART.grid} />
+                <XAxis
+                  dataKey="month"
+                  stroke={CHART.axis}
+                  fontSize={12}
+                  tickLine={false}
+                  axisLine={{ stroke: CHART.grid }}
+                />
+                <YAxis
+                  stroke={CHART.axis}
+                  fontSize={12}
+                  allowDecimals={false}
+                  tickLine={false}
+                  axisLine={{ stroke: CHART.grid }}
+                />
+                <Tooltip
+                  contentStyle={{
+                    backgroundColor: 'white',
+                    border: `1px solid ${CHART.grid}`,
+                    borderRadius: '12px',
+                    boxShadow:
+                      '0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)',
+                    fontSize: '13px',
+                  }}
+                />
+                <Legend wrapperStyle={{ fontSize: '13px' }} />
+                <Line
+                  type="monotone"
+                  dataKey="appointments"
+                  stroke={CHART.primary}
+                  strokeWidth={2.5}
+                  dot={{ fill: CHART.primary, r: 4 }}
+                  activeDot={{ r: 6 }}
+                  name="Total appointments"
+                />
+                <Line
+                  type="monotone"
+                  dataKey="completed"
+                  stroke={CHART.success}
+                  strokeWidth={2.5}
+                  dot={{ fill: CHART.success, r: 4 }}
+                  activeDot={{ r: 6 }}
+                  name="Completed"
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </SectionCard>
 
           {/* Weekly Appointments Chart */}
-          <motion.div
-            initial={{ y: 20, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            transition={{ delay: 0.5 }}
+          <SectionCard
+            title="Weekly appointments breakdown"
+            description="Current week, by day (Mon → Sun)"
           >
-            <Card className="hover:shadow-lg transition-shadow">
-              <CardHeader>
-                <CardTitle>Weekly Appointments Breakdown</CardTitle>
-                <CardDescription>
-                  Current week, by day (Mon → Sun)
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <ResponsiveContainer width="100%" height={300}>
-                  <BarChart data={data?.weekly ?? []}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                    <XAxis dataKey="day" stroke="#999" />
-                    <YAxis stroke="#999" allowDecimals={false} />
-                    <Tooltip
-                      contentStyle={{
-                        backgroundColor: 'white',
-                        border: '1px solid #e0e0e0',
-                        borderRadius: '8px',
-                      }}
-                    />
-                    <Legend />
-                    <Bar
-                      dataKey="booked"
-                      fill="#2F80ED"
-                      radius={[8, 8, 0, 0]}
-                      name="Booked"
-                    />
-                    <Bar
-                      dataKey="confirmed"
-                      fill="#27AE60"
-                      radius={[8, 8, 0, 0]}
-                      name="Confirmed"
-                    />
-                    <Bar
-                      dataKey="cancelled"
-                      fill="#F2994A"
-                      radius={[8, 8, 0, 0]}
-                      name="Cancelled"
-                    />
-                  </BarChart>
-                </ResponsiveContainer>
-              </CardContent>
-            </Card>
-          </motion.div>
+            <ResponsiveContainer width="100%" height={300}>
+              <BarChart data={data?.weekly ?? []}>
+                <CartesianGrid strokeDasharray="3 3" stroke={CHART.grid} />
+                <XAxis
+                  dataKey="day"
+                  stroke={CHART.axis}
+                  fontSize={12}
+                  tickLine={false}
+                  axisLine={{ stroke: CHART.grid }}
+                />
+                <YAxis
+                  stroke={CHART.axis}
+                  fontSize={12}
+                  allowDecimals={false}
+                  tickLine={false}
+                  axisLine={{ stroke: CHART.grid }}
+                />
+                <Tooltip
+                  cursor={{ fill: 'rgb(79 70 229 / 0.06)' }}
+                  contentStyle={{
+                    backgroundColor: 'white',
+                    border: `1px solid ${CHART.grid}`,
+                    borderRadius: '12px',
+                    boxShadow:
+                      '0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)',
+                    fontSize: '13px',
+                  }}
+                />
+                <Legend wrapperStyle={{ fontSize: '13px' }} />
+                <Bar
+                  dataKey="booked"
+                  fill={CHART.primary}
+                  radius={[6, 6, 0, 0]}
+                  name="Booked"
+                />
+                <Bar
+                  dataKey="confirmed"
+                  fill={CHART.success}
+                  radius={[6, 6, 0, 0]}
+                  name="Confirmed"
+                />
+                <Bar
+                  dataKey="cancelled"
+                  fill={CHART.destructive}
+                  radius={[6, 6, 0, 0]}
+                  name="Cancelled"
+                />
+              </BarChart>
+            </ResponsiveContainer>
+          </SectionCard>
         </div>
       </div>
     </div>

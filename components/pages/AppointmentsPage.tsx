@@ -19,10 +19,12 @@ import {
   User,
   Plus,
 } from 'lucide-react';
-import { Card, CardContent } from '../ui/card';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Badge } from '../ui/badge';
+import { StatusBadge } from '../ui/status-badge';
+import { SectionCard } from '../ui/section-card';
+import { EmptyState } from '../ui/empty-state';
 import {
   Select,
   SelectContent,
@@ -34,7 +36,6 @@ import { Calendar } from '../ui/calendar';
 import { TopBar } from '../ui/TopBar';
 import { PaginationBar } from '../ui/PaginationBar';
 import { NewAppointmentModal } from '../ui/NewAppointmentModal';
-import { motion } from 'motion/react';
 import type { AppointmentStatus, AppointmentType } from '@prisma/client';
 
 interface AppointmentRow {
@@ -63,6 +64,23 @@ function formatTime(iso: string): string {
   });
 }
 
+function formatDate(iso: string): string {
+  return new Date(iso).toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
+}
+
+function initials(name: string): string {
+  return name
+    .split(' ')
+    .map((n) => n[0])
+    .join('')
+    .slice(0, 2)
+    .toUpperCase();
+}
+
 function isSameLocalDay(isoA: string, dateB: Date): boolean {
   const a = new Date(isoA);
   return (
@@ -72,19 +90,22 @@ function isSameLocalDay(isoA: string, dateB: Date): boolean {
   );
 }
 
-function statusBadgeClass(status: AppointmentStatus): string {
-  switch (status) {
-    case 'Confirmed':
-      return 'bg-[#27AE60]/10 text-[#27AE60]';
-    case 'Pending':
-      return 'bg-[#F2994A]/10 text-[#F2994A]';
-    case 'Completed':
-      return 'bg-[#2F80ED]/10 text-[#2F80ED]';
-    case 'Cancelled':
-    default:
-      return 'bg-gray-200 text-gray-600';
-  }
-}
+// Full-width layout overrides for the calendar; colors come from the
+// Calendar component's own token-based defaults (bg-primary selection, etc.).
+const calendarClassNames = {
+  months: 'w-full',
+  month: 'w-full space-y-4',
+  caption: 'flex justify-center pt-1 relative items-center',
+  caption_label: 'text-sm font-medium',
+  table: 'w-full border-collapse',
+  head_row: 'flex w-full',
+  head_cell:
+    'text-muted-foreground rounded-md w-full font-normal text-[0.7rem] uppercase tracking-wide',
+  row: 'flex w-full mt-2',
+  cell: 'relative w-full p-0 text-center text-sm',
+  day: 'h-9 w-full p-0 font-normal rounded-md',
+  day_outside: 'text-muted-foreground opacity-50',
+};
 
 export function AppointmentsPage({
   initialAppointments,
@@ -145,245 +166,195 @@ export function AppointmentsPage({
     currentPage * itemsPerPage,
   );
 
+  const summaryTiles = [
+    {
+      label: 'Total (selected day)',
+      value: dateScoped.length,
+      icon: CalendarIcon,
+      tile: 'bg-primary-muted',
+      iconColor: 'text-primary',
+    },
+    {
+      label: 'Confirmed',
+      value: dateScopedConfirmed,
+      icon: Clock,
+      tile: 'bg-success-muted',
+      iconColor: 'text-success',
+    },
+    {
+      label: 'Pending',
+      value: dateScopedPending,
+      icon: Clock,
+      tile: 'bg-warning-muted',
+      iconColor: 'text-warning',
+    },
+  ];
+
   return (
-    <div className="min-h-screen bg-[#F7F9FB]">
+    <div>
       <TopBar
         title="Appointments"
         actionButton={
-          <Button
-            className="bg-gradient-to-r from-[#2F80ED] to-[#56CCF2] hover:opacity-90 shadow-md"
-            onClick={() => setIsNewAppointmentModalOpen(true)}
-          >
-            <Plus className="w-4 h-4 mr-2" />
-            New Appointment
+          <Button onClick={() => setIsNewAppointmentModalOpen(true)}>
+            <Plus />
+            New appointment
           </Button>
         }
       />
 
-      <div className="p-6 max-w-7xl mx-auto space-y-6">
-        {/* Calendar + tiles */}
-        <motion.div
-          initial={{ y: -20, opacity: 0 }}
-          animate={{ y: 0, opacity: 1 }}
-        >
-          <Card className="hover:shadow-lg transition-shadow">
-            <CardContent className="p-6">
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                <div>
-                  <h3 className="text-lg font-semibold text-[#333333] mb-4 flex items-center gap-2">
-                    <CalendarIcon className="w-5 h-5 text-[#2F80ED]" />
-                    Calendar
-                  </h3>
-                  <Calendar
-                    mode="single"
-                    selected={selectedDate}
-                    onSelect={setSelectedDate}
-                    className="rounded-md border-0 w-full"
-                    classNames={{
-                      months: 'w-full',
-                      month: 'w-full',
-                      caption: 'flex justify-center pt-1 relative items-center',
-                      caption_label: 'text-sm font-medium',
-                      nav: 'space-x-1 flex items-center',
-                      nav_button:
-                        'h-7 w-7 bg-transparent p-0 opacity-50 hover:opacity-100',
-                      table: 'w-full border-collapse mt-4',
-                      head_row: 'flex w-full',
-                      head_cell:
-                        'text-gray-500 rounded-md w-full font-normal text-[10px]',
-                      row: 'flex w-full mt-2',
-                      cell: 'text-center text-sm p-0 relative w-full h-9',
-                      day: 'h-9 w-full p-0 font-normal hover:bg-[#2F80ED]/10 rounded-full transition-colors text-sm',
-                      day_selected:
-                        'bg-gradient-to-r from-[#2F80ED] to-[#56CCF2] text-white hover:bg-gradient-to-r hover:from-[#2F80ED] hover:to-[#56CCF2] hover:text-white rounded-full',
-                      day_today: 'bg-gray-100 text-gray-900 rounded-full',
-                      day_outside: 'text-gray-400 opacity-50',
-                    }}
-                  />
-                </div>
+      <div className="mx-auto max-w-7xl space-y-6 p-6">
+        {/* Calendar + summary */}
+        <SectionCard>
+          <div className="grid grid-cols-1 gap-8 lg:grid-cols-2">
+            <div>
+              <h3 className="mb-4 flex items-center gap-2 text-base font-semibold text-foreground">
+                <CalendarIcon className="size-5 text-primary" />
+                Calendar
+              </h3>
+              <Calendar
+                mode="single"
+                selected={selectedDate}
+                onSelect={setSelectedDate}
+                className="w-full p-0"
+                classNames={calendarClassNames}
+              />
+            </div>
 
-                <div>
-                  <h3 className="text-lg font-semibold text-[#333333] mb-4">
-                    Summary
-                  </h3>
-                  <p className="text-sm text-gray-600 mb-4">
-                    {selectedDate?.toLocaleDateString('en-US', {
-                      month: 'long',
-                      day: 'numeric',
-                      year: 'numeric',
-                    })}
-                  </p>
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between p-4 bg-[#2F80ED]/10 rounded-lg">
+            <div>
+              <h3 className="mb-1 text-base font-semibold text-foreground">
+                Summary
+              </h3>
+              <p className="mb-4 text-sm text-muted-foreground">
+                {selectedDate?.toLocaleDateString('en-US', {
+                  weekday: 'long',
+                  month: 'long',
+                  day: 'numeric',
+                  year: 'numeric',
+                })}
+              </p>
+              <div className="space-y-3">
+                {summaryTiles.map((tile) => {
+                  const TileIcon = tile.icon;
+                  return (
+                    <div
+                      key={tile.label}
+                      className={`flex items-center justify-between rounded-lg p-4 ${tile.tile}`}
+                    >
                       <div className="flex items-center gap-2">
-                        <CalendarIcon className="w-5 h-5 text-[#2F80ED]" />
-                        <span className="text-sm text-gray-700 font-medium">
-                          Total Appointments (selected day)
+                        <TileIcon className={`size-5 ${tile.iconColor}`} />
+                        <span className="text-sm font-medium text-foreground">
+                          {tile.label}
                         </span>
                       </div>
-                      <span className="text-2xl font-semibold text-[#333333]">
-                        {dateScoped.length}
+                      <span className="text-2xl font-semibold tracking-tight text-foreground">
+                        {tile.value}
                       </span>
                     </div>
-                    <div className="flex items-center justify-between p-4 bg-[#27AE60]/10 rounded-lg">
-                      <div className="flex items-center gap-2">
-                        <Clock className="w-5 h-5 text-[#27AE60]" />
-                        <span className="text-sm text-gray-700 font-medium">
-                          Confirmed
-                        </span>
-                      </div>
-                      <span className="text-2xl font-semibold text-[#333333]">
-                        {dateScopedConfirmed}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between p-4 bg-[#F2994A]/10 rounded-lg">
-                      <div className="flex items-center gap-2">
-                        <Clock className="w-5 h-5 text-[#F2994A]" />
-                        <span className="text-sm text-gray-700 font-medium">
-                          Pending
-                        </span>
-                      </div>
-                      <span className="text-2xl font-semibold text-[#333333]">
-                        {dateScopedPending}
-                      </span>
-                    </div>
-                  </div>
-                  <p className="text-xs text-gray-400 mt-4">
-                    Showing {initialTotals.total} appointments overall ·{' '}
-                    {initialTotals.confirmed} confirmed ·{' '}
-                    {initialTotals.pending} pending.
-                  </p>
-                </div>
+                  );
+                })}
               </div>
-            </CardContent>
-          </Card>
-        </motion.div>
+              <p className="mt-4 text-xs text-muted-foreground">
+                Showing {initialTotals.total} appointments overall ·{' '}
+                {initialTotals.confirmed} confirmed · {initialTotals.pending}{' '}
+                pending.
+              </p>
+            </div>
+          </div>
+        </SectionCard>
 
         {/* Filters */}
-        <motion.div
-          initial={{ y: -20, opacity: 0 }}
-          animate={{ y: 0, opacity: 1 }}
-          className="flex flex-col sm:flex-row gap-4"
-        >
+        <div className="flex flex-col gap-3 sm:flex-row">
           <div className="relative flex-1">
-            <Search className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
+            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input
-              placeholder="Search patients or doctors..."
+              placeholder="Search patients or doctors…"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-10 h-12"
+              className="pl-9"
             />
           </div>
           <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className="w-full sm:w-48 h-12">
+            <SelectTrigger className="w-full sm:w-48">
               <SelectValue placeholder="Filter by status" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All Status</SelectItem>
+              <SelectItem value="all">All status</SelectItem>
               <SelectItem value="Confirmed">Confirmed</SelectItem>
               <SelectItem value="Pending">Pending</SelectItem>
               <SelectItem value="Completed">Completed</SelectItem>
               <SelectItem value="Cancelled">Cancelled</SelectItem>
             </SelectContent>
           </Select>
-        </motion.div>
+        </div>
 
         {/* Appointments list */}
         {paginatedAppointments.length === 0 ? (
-          <Card className="border-2 border-dashed border-gray-300">
-            <CardContent className="p-12 text-center">
-              <CalendarIcon className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-              <h3 className="text-xl text-gray-600 mb-2">
-                {initialAppointments.length === 0
+          <SectionCard>
+            <EmptyState
+              icon={<CalendarIcon />}
+              title={
+                initialAppointments.length === 0
                   ? 'No appointments yet'
-                  : 'No appointments match'}
-              </h3>
-              <p className="text-gray-500 mb-6">
-                {initialAppointments.length === 0
+                  : 'No appointments match'
+              }
+              description={
+                initialAppointments.length === 0
                   ? 'Schedule your first appointment to get started.'
-                  : 'Try adjusting your search or status filter.'}
-              </p>
-              <Button
-                className="bg-[#2F80ED] hover:bg-[#2F80ED]/90"
-                onClick={() => setIsNewAppointmentModalOpen(true)}
-              >
-                <Plus className="w-4 h-4 mr-2" />
-                Add Appointment
-              </Button>
-            </CardContent>
-          </Card>
+                  : 'Try adjusting your search or status filter.'
+              }
+              action={
+                <Button onClick={() => setIsNewAppointmentModalOpen(true)}>
+                  <Plus />
+                  Add appointment
+                </Button>
+              }
+            />
+          </SectionCard>
         ) : (
-          <div className="space-y-4">
-            {paginatedAppointments.map((appointment, index) => (
-              <motion.div
-                key={appointment.id}
-                initial={{ y: 20, opacity: 0 }}
-                animate={{ y: 0, opacity: 1 }}
-                transition={{ delay: index * 0.05 }}
-                whileHover={{ scale: 1.01, x: 5 }}
-              >
-                <Card className="hover:shadow-lg transition-all cursor-pointer">
-                  <CardContent className="p-6">
-                    <div className="flex items-center justify-between flex-wrap gap-4">
-                      <div className="flex items-center gap-4">
-                        <div className="w-14 h-14 bg-gradient-to-br from-[#2F80ED] to-[#56CCF2] rounded-full flex items-center justify-center text-white text-lg shadow-md">
-                          {appointment.patient.fullName
-                            .split(' ')
-                            .map((n) => n[0])
-                            .join('')
-                            .slice(0, 2)
-                            .toUpperCase()}
-                        </div>
-                        <div>
-                          <h3 className="text-lg text-[#333333] font-medium mb-1">
-                            {appointment.patient.fullName}
-                          </h3>
-                          <div className="flex items-center gap-4 text-sm text-gray-600 flex-wrap">
-                            <span className="flex items-center gap-1">
-                              <User className="w-4 h-4" />
-                              {appointment.doctor.name}
-                            </span>
-                            <span className="flex items-center gap-1">
-                              <Clock className="w-4 h-4" />
-                              {formatTime(appointment.scheduledAt)}
-                            </span>
-                            <span className="text-gray-400">
-                              {new Date(
-                                appointment.scheduledAt,
-                              ).toLocaleDateString('en-US', {
-                                month: 'short',
-                                day: 'numeric',
-                                year: 'numeric',
-                              })}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-3 flex-wrap">
-                        <Badge
-                          variant="outline"
-                          className="px-3 py-1 text-xs bg-gray-50"
-                        >
-                          {appointment.type}
-                        </Badge>
-                        <Badge
-                          className={`px-3 py-1 text-xs ${statusBadgeClass(appointment.status)}`}
-                        >
-                          {appointment.status}
-                        </Badge>
+          <SectionCard noPadding>
+            <ul className="divide-y divide-border">
+              {paginatedAppointments.map((appointment) => (
+                <li
+                  key={appointment.id}
+                  className="flex flex-wrap items-center justify-between gap-4 px-6 py-4 transition-colors hover:bg-muted/60"
+                >
+                  <div className="flex min-w-0 items-center gap-4">
+                    <div className="flex size-12 shrink-0 items-center justify-center rounded-full bg-primary-muted text-sm font-semibold text-primary">
+                      {initials(appointment.patient.fullName)}
+                    </div>
+                    <div className="min-w-0">
+                      <h3 className="truncate font-medium text-foreground">
+                        {appointment.patient.fullName}
+                      </h3>
+                      <div className="mt-0.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
+                        <span className="flex items-center gap-1">
+                          <User className="size-4" />
+                          {appointment.doctor.name}
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <Clock className="size-4" />
+                          {formatTime(appointment.scheduledAt)}
+                        </span>
+                        <span className="text-muted-foreground/70">
+                          {formatDate(appointment.scheduledAt)}
+                        </span>
                       </div>
                     </div>
-                  </CardContent>
-                </Card>
-              </motion.div>
-            ))}
-          </div>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant="secondary">{appointment.type}</Badge>
+                    <StatusBadge status={appointment.status} />
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </SectionCard>
         )}
       </div>
 
       {/* Pagination */}
       {filteredAppointments.length > 0 && (
-        <div className="px-6 pb-6 max-w-7xl mx-auto">
+        <div className="mx-auto max-w-7xl px-6 pb-6">
           <PaginationBar
             currentPage={currentPage}
             totalPages={totalPages}

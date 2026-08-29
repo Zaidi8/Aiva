@@ -23,7 +23,6 @@ import { useState, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { useRouter } from 'next/navigation';
 import { User, Bell, Lock, Bot, Palette, Save, AlertTriangle } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../ui/card';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
@@ -31,7 +30,7 @@ import { Switch } from '../ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 import { TopBar } from '../ui/TopBar';
 import { Textarea } from '../ui/textarea';
-import { motion } from 'motion/react';
+import { SectionCard } from '../ui/section-card';
 import { apiPatch, ApiError } from '@/lib/client/fetcher';
 
 interface InitialStaff {
@@ -86,6 +85,43 @@ interface AccountFormValues {
 }
 
 type AiFormValues = InitialAiSettings;
+
+// Small inline field error. Kept text-xs to stay compact under inputs.
+function FieldError({ message }: { message?: string }) {
+  if (!message) return null;
+  return <p className="text-xs text-destructive">{message}</p>;
+}
+
+// A labelled switch row (used across Notifications, AI, Appearance, Security).
+// `checked`/`onCheckedChange` drive the controlled AI rows; the UI-only tabs
+// pass `defaultChecked` and leave it uncontrolled.
+function ToggleRow({
+  label,
+  description,
+  checked,
+  defaultChecked,
+  onCheckedChange,
+}: {
+  label: string;
+  description: string;
+  checked?: boolean;
+  defaultChecked?: boolean;
+  onCheckedChange?: (checked: boolean) => void;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-4 rounded-lg border border-border bg-muted/40 p-4">
+      <div className="min-w-0 flex-1">
+        <p className="font-medium text-foreground">{label}</p>
+        <p className="text-sm text-muted-foreground">{description}</p>
+      </div>
+      <Switch
+        checked={checked}
+        defaultChecked={defaultChecked}
+        onCheckedChange={onCheckedChange}
+      />
+    </div>
+  );
+}
 
 export function SettingsPage({
   initialTab = 'profile',
@@ -243,443 +279,342 @@ export function SettingsPage({
   const accountSubmitting = accountForm.formState.isSubmitting;
   const aiSubmitting = aiForm.formState.isSubmitting;
 
+  const TABS = [
+    { value: 'profile', label: 'Profile', icon: User },
+    { value: 'notifications', label: 'Notifications', icon: Bell },
+    { value: 'security', label: 'Security', icon: Lock },
+    { value: 'ai', label: 'AI Settings', icon: Bot },
+    { value: 'appearance', label: 'Appearance', icon: Palette },
+  ];
+
   return (
-    <div className="min-h-screen bg-[#F7F9FB]">
+    <div>
       <TopBar
         title="Settings"
         description="Manage your account and application preferences"
       />
 
-      <div className="p-8 max-w-5xl mx-auto">
+      <div className="mx-auto max-w-5xl p-6">
         <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="grid w-full grid-cols-5 mb-8">
-            <TabsTrigger value="profile" className="flex items-center gap-2">
-              <User className="w-4 h-4" />
-              <span className="hidden sm:inline">Profile</span>
-            </TabsTrigger>
-            <TabsTrigger value="notifications" className="flex items-center gap-2">
-              <Bell className="w-4 h-4" />
-              <span className="hidden sm:inline">Notifications</span>
-            </TabsTrigger>
-            <TabsTrigger value="security" className="flex items-center gap-2">
-              <Lock className="w-4 h-4" />
-              <span className="hidden sm:inline">Security</span>
-            </TabsTrigger>
-            <TabsTrigger value="ai" className="flex items-center gap-2">
-              <Bot className="w-4 h-4" />
-              <span className="hidden sm:inline">AI Settings</span>
-            </TabsTrigger>
-            <TabsTrigger value="appearance" className="flex items-center gap-2">
-              <Palette className="w-4 h-4" />
-              <span className="hidden sm:inline">Appearance</span>
-            </TabsTrigger>
+          <TabsList className="mb-6 grid w-full grid-cols-5">
+            {TABS.map((t) => (
+              <TabsTrigger
+                key={t.value}
+                value={t.value}
+                className="flex items-center gap-2"
+              >
+                <t.icon className="size-4" />
+                <span className="hidden sm:inline">{t.label}</span>
+              </TabsTrigger>
+            ))}
           </TabsList>
 
           {/* ── Profile Settings ─────────────────────────────────────────── */}
-          <TabsContent value="profile">
-            <motion.div
-              initial={{ y: 20, opacity: 0 }}
-              animate={{ y: 0, opacity: 1 }}
-              className="space-y-6"
+          <TabsContent value="profile" className="space-y-6">
+            <SectionCard
+              title="Your account"
+              description="These details are tied to your login. Email is managed via your Supabase Auth account and can’t be changed here."
             >
-              <Card>
-                <CardHeader>
-                  <CardTitle>Your account</CardTitle>
-                  <CardDescription>
-                    These details are tied to your login. Email is managed via your
-                    Supabase Auth account and can&apos;t be changed here.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <form onSubmit={onAccountSubmit} className="space-y-6" noValidate>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      <div className="space-y-2">
-                        <Label htmlFor="name">Full Name</Label>
-                        <Input
-                          id="name"
-                          aria-invalid={!!accountForm.formState.errors.fullName}
-                          {...accountForm.register('fullName')}
-                        />
-                        {accountForm.formState.errors.fullName && (
-                          <p className="text-xs text-red-600">
-                            {accountForm.formState.errors.fullName.message}
-                          </p>
-                        )}
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="email">Email</Label>
-                        <Input
-                          id="email"
-                          type="email"
-                          defaultValue={initialStaff.email}
-                          disabled
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="phone">Phone</Label>
-                        <Input
-                          id="phone"
-                          placeholder="555-0101"
-                          aria-invalid={!!accountForm.formState.errors.phone}
-                          {...accountForm.register('phone')}
-                        />
-                        {accountForm.formState.errors.phone && (
-                          <p className="text-xs text-red-600">
-                            {accountForm.formState.errors.phone.message}
-                          </p>
-                        )}
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="jobTitle">Job Title</Label>
-                        <Input
-                          id="jobTitle"
-                          placeholder="Practice Manager"
-                          {...accountForm.register('jobTitle')}
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="role">Role</Label>
-                        <Input
-                          id="role"
-                          defaultValue={initialStaff.role}
-                          disabled
-                        />
-                      </div>
+              <form onSubmit={onAccountSubmit} className="space-y-6" noValidate>
+                <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="name">Full name</Label>
+                    <Input
+                      id="name"
+                      aria-invalid={!!accountForm.formState.errors.fullName}
+                      {...accountForm.register('fullName')}
+                    />
+                    <FieldError
+                      message={accountForm.formState.errors.fullName?.message}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="email">Email</Label>
+                    <Input
+                      id="email"
+                      type="email"
+                      defaultValue={initialStaff.email}
+                      disabled
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="phone">Phone</Label>
+                    <Input
+                      id="phone"
+                      placeholder="555-0101"
+                      aria-invalid={!!accountForm.formState.errors.phone}
+                      {...accountForm.register('phone')}
+                    />
+                    <FieldError
+                      message={accountForm.formState.errors.phone?.message}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="jobTitle">Job title</Label>
+                    <Input
+                      id="jobTitle"
+                      placeholder="Practice Manager"
+                      {...accountForm.register('jobTitle')}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="role">Role</Label>
+                    <Input id="role" defaultValue={initialStaff.role} disabled />
+                  </div>
+                </div>
+
+                <Button type="submit" disabled={accountSubmitting}>
+                  <Save />
+                  {accountSubmitting ? 'Saving…' : 'Save account'}
+                </Button>
+              </form>
+            </SectionCard>
+
+            <SectionCard
+              title="Clinic information"
+              description="Update your clinic’s public contact info. The voice phone is the number patients dial to reach your AI receptionist."
+            >
+              <form onSubmit={onProfileSubmit} className="space-y-6" noValidate>
+                <div className="space-y-2">
+                  <Label htmlFor="clinicName">Clinic name</Label>
+                  <Input
+                    id="clinicName"
+                    aria-invalid={!!profileForm.formState.errors.clinicName}
+                    {...profileForm.register('clinicName')}
+                  />
+                  <FieldError
+                    message={profileForm.formState.errors.clinicName?.message}
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="clinicPhone">Clinic phone</Label>
+                    <Input
+                      id="clinicPhone"
+                      aria-invalid={!!profileForm.formState.errors.clinicPhone}
+                      {...profileForm.register('clinicPhone')}
+                    />
+                    <FieldError
+                      message={profileForm.formState.errors.clinicPhone?.message}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="clinicEmail">Clinic email</Label>
+                    <Input
+                      id="clinicEmail"
+                      type="email"
+                      aria-invalid={!!profileForm.formState.errors.clinicEmail}
+                      {...profileForm.register('clinicEmail')}
+                    />
+                    <FieldError
+                      message={profileForm.formState.errors.clinicEmail?.message}
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="clinicAddress">Clinic address</Label>
+                  <Textarea
+                    id="clinicAddress"
+                    rows={3}
+                    aria-invalid={!!profileForm.formState.errors.clinicAddress}
+                    {...profileForm.register('clinicAddress')}
+                  />
+                  <FieldError
+                    message={profileForm.formState.errors.clinicAddress?.message}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="clinicVoicePhone">
+                    Voice phone (inbound AI number)
+                  </Label>
+                  {initialClinic.voicePhone && !voiceGoLiveReady && (
+                    <div className="flex items-start gap-2 rounded-lg border border-warning/30 bg-warning-muted px-3 py-2 text-xs text-warning-muted-foreground">
+                      <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+                      <span>
+                        Your AI number is set, but no doctor has working hours
+                        yet — the receptionist can answer calls but can’t book
+                        anyone. Add a doctor and set their schedule to go fully
+                        live.
+                      </span>
                     </div>
+                  )}
+                  <Input
+                    id="clinicVoicePhone"
+                    placeholder="e.g. +1 555 0100"
+                    aria-invalid={!!profileForm.formState.errors.clinicVoicePhone}
+                    {...profileForm.register('clinicVoicePhone')}
+                  />
+                  <FieldError
+                    message={
+                      profileForm.formState.errors.clinicVoicePhone?.message
+                    }
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Leave blank until you’ve provisioned a phone number for the
+                    AI receptionist.
+                  </p>
+                </div>
 
-                    <Button
-                      type="submit"
-                      disabled={accountSubmitting}
-                      className="bg-[#2F80ED] hover:bg-[#2F80ED]/90"
-                    >
-                      <Save className="w-4 h-4 mr-2" />
-                      {accountSubmitting ? 'Saving...' : 'Save Account'}
-                    </Button>
-                  </form>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader>
-                  <CardTitle>Clinic information</CardTitle>
-                  <CardDescription>
-                    Update your clinic&apos;s public contact info. The voice phone is the
-                    number patients dial to reach your AI receptionist.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <form onSubmit={onProfileSubmit} className="space-y-6" noValidate>
-                    <div className="space-y-2">
-                      <Label htmlFor="clinicName">Clinic Name</Label>
-                      <Input
-                        id="clinicName"
-                        aria-invalid={!!profileForm.formState.errors.clinicName}
-                        {...profileForm.register('clinicName')}
-                      />
-                      {profileForm.formState.errors.clinicName && (
-                        <p className="text-xs text-red-600">
-                          {profileForm.formState.errors.clinicName.message}
-                        </p>
-                      )}
-                    </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      <div className="space-y-2">
-                        <Label htmlFor="clinicPhone">Clinic Phone</Label>
-                        <Input
-                          id="clinicPhone"
-                          aria-invalid={!!profileForm.formState.errors.clinicPhone}
-                          {...profileForm.register('clinicPhone')}
-                        />
-                        {profileForm.formState.errors.clinicPhone && (
-                          <p className="text-xs text-red-600">
-                            {profileForm.formState.errors.clinicPhone.message}
-                          </p>
-                        )}
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="clinicEmail">Clinic Email</Label>
-                        <Input
-                          id="clinicEmail"
-                          type="email"
-                          aria-invalid={!!profileForm.formState.errors.clinicEmail}
-                          {...profileForm.register('clinicEmail')}
-                        />
-                        {profileForm.formState.errors.clinicEmail && (
-                          <p className="text-xs text-red-600">
-                            {profileForm.formState.errors.clinicEmail.message}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="clinicAddress">Clinic Address</Label>
-                      <Textarea
-                        id="clinicAddress"
-                        rows={3}
-                        aria-invalid={!!profileForm.formState.errors.clinicAddress}
-                        {...profileForm.register('clinicAddress')}
-                      />
-                      {profileForm.formState.errors.clinicAddress && (
-                        <p className="text-xs text-red-600">
-                          {profileForm.formState.errors.clinicAddress.message}
-                        </p>
-                      )}
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="clinicVoicePhone">Voice Phone (inbound AI number)</Label>
-                      {initialClinic.voicePhone && !voiceGoLiveReady && (
-                        <div className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                          <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
-                          <span>
-                            Your AI number is set, but no doctor has working
-                            hours yet — the receptionist can answer calls but
-                            can’t book anyone. Add a doctor and set their
-                            schedule to go fully live.
-                          </span>
-                        </div>
-                      )}
-                      <Input
-                        id="clinicVoicePhone"
-                        placeholder="e.g. +1 555 0100"
-                        aria-invalid={!!profileForm.formState.errors.clinicVoicePhone}
-                        {...profileForm.register('clinicVoicePhone')}
-                      />
-                      {profileForm.formState.errors.clinicVoicePhone && (
-                        <p className="text-xs text-red-600">
-                          {profileForm.formState.errors.clinicVoicePhone.message}
-                        </p>
-                      )}
-                      <p className="text-[10px] text-gray-500">
-                        Leave blank until you&apos;ve provisioned a phone number for the
-                        AI receptionist.
-                      </p>
-                    </div>
-
-                    <Button
-                      type="submit"
-                      disabled={profileSubmitting}
-                      className="bg-[#2F80ED] hover:bg-[#2F80ED]/90"
-                    >
-                      <Save className="w-4 h-4 mr-2" />
-                      {profileSubmitting ? 'Saving...' : 'Save Changes'}
-                    </Button>
-                  </form>
-                </CardContent>
-              </Card>
-            </motion.div>
+                <Button type="submit" disabled={profileSubmitting}>
+                  <Save />
+                  {profileSubmitting ? 'Saving…' : 'Save changes'}
+                </Button>
+              </form>
+            </SectionCard>
           </TabsContent>
 
           {/* ── Notifications Settings (UI-only, no backend yet) ─────────── */}
-          <TabsContent value="notifications">
-            <motion.div
-              initial={{ y: 20, opacity: 0 }}
-              animate={{ y: 0, opacity: 1 }}
-              className="space-y-6"
+          <TabsContent value="notifications" className="space-y-6">
+            <SectionCard
+              title="Notification preferences"
+              description="Coming soon. These toggles aren’t persisted yet."
             >
-              <Card>
-                <CardHeader>
-                  <CardTitle>Notification Preferences</CardTitle>
-                  <CardDescription>
-                    Coming soon. These toggles aren&apos;t persisted yet.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-6">
-                  {[
-                    { label: 'New Appointments', description: 'Get notified when new appointments are booked', defaultChecked: true },
-                    { label: 'Appointment Cancellations', description: 'Receive alerts for cancelled appointments', defaultChecked: true },
-                    { label: 'AI Call Notifications', description: 'Notifications for AI receptionist call activity', defaultChecked: true },
-                    { label: 'Daily Summary', description: 'Receive daily summary emails', defaultChecked: false },
-                    { label: 'System Updates', description: 'Get notified about system updates and maintenance', defaultChecked: true },
-                  ].map((setting, index) => (
-                    <div key={index} className="flex items-center justify-between p-4 bg-[#F7F9FB] rounded-lg">
-                      <div className="flex-1">
-                        <p className="font-medium text-[#333333]">{setting.label}</p>
-                        <p className="text-sm text-gray-600">{setting.description}</p>
-                      </div>
-                      <Switch defaultChecked={setting.defaultChecked} />
-                    </div>
-                  ))}
-                  <Button onClick={handleNotYetImplemented} className="bg-[#2F80ED] hover:bg-[#2F80ED]/90">
-                    <Save className="w-4 h-4 mr-2" />
-                    Save Preferences
-                  </Button>
-                </CardContent>
-              </Card>
-            </motion.div>
+              <div className="space-y-4">
+                {[
+                  { label: 'New appointments', description: 'Get notified when new appointments are booked', defaultChecked: true },
+                  { label: 'Appointment cancellations', description: 'Receive alerts for cancelled appointments', defaultChecked: true },
+                  { label: 'AI call notifications', description: 'Notifications for AI receptionist call activity', defaultChecked: true },
+                  { label: 'Daily summary', description: 'Receive daily summary emails', defaultChecked: false },
+                  { label: 'System updates', description: 'Get notified about system updates and maintenance', defaultChecked: true },
+                ].map((setting) => (
+                  <ToggleRow
+                    key={setting.label}
+                    label={setting.label}
+                    description={setting.description}
+                    defaultChecked={setting.defaultChecked}
+                  />
+                ))}
+                <Button onClick={handleNotYetImplemented}>
+                  <Save />
+                  Save preferences
+                </Button>
+              </div>
+            </SectionCard>
           </TabsContent>
 
           {/* ── Security Settings (UI-only) ──────────────────────────────── */}
-          <TabsContent value="security">
-            <motion.div
-              initial={{ y: 20, opacity: 0 }}
-              animate={{ y: 0, opacity: 1 }}
-              className="space-y-6"
+          <TabsContent value="security" className="space-y-6">
+            <SectionCard
+              title="Change password"
+              description="Password updates aren’t wired up yet. Use Supabase Auth directly until this is connected."
             >
-              <Card>
-                <CardHeader>
-                  <CardTitle>Change Password</CardTitle>
-                  <CardDescription>
-                    Password updates aren&apos;t wired up yet. Use Supabase Auth
-                    directly until this is connected.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="current-password">Current Password</Label>
-                    <Input id="current-password" type="password" />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="new-password">New Password</Label>
-                    <Input id="new-password" type="password" />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="confirm-password">Confirm New Password</Label>
-                    <Input id="confirm-password" type="password" />
-                  </div>
-                  <Button onClick={handleNotYetImplemented} className="bg-[#2F80ED] hover:bg-[#2F80ED]/90">
-                    <Save className="w-4 h-4 mr-2" />
-                    Update Password
-                  </Button>
-                </CardContent>
-              </Card>
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="current-password">Current password</Label>
+                  <Input id="current-password" type="password" />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="new-password">New password</Label>
+                  <Input id="new-password" type="password" />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="confirm-password">Confirm new password</Label>
+                  <Input id="confirm-password" type="password" />
+                </div>
+                <Button onClick={handleNotYetImplemented}>
+                  <Save />
+                  Update password
+                </Button>
+              </div>
+            </SectionCard>
 
-              <Card>
-                <CardHeader>
-                  <CardTitle>Two-Factor Authentication</CardTitle>
-                  <CardDescription>Add an extra layer of security to your account</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="flex items-center justify-between p-4 bg-[#F7F9FB] rounded-lg">
-                    <div>
-                      <p className="font-medium text-[#333333]">Enable 2FA</p>
-                      <p className="text-sm text-gray-600">Secure your account with two-factor authentication</p>
-                    </div>
-                    <Switch />
-                  </div>
-                </CardContent>
-              </Card>
-            </motion.div>
+            <SectionCard
+              title="Two-factor authentication"
+              description="Add an extra layer of security to your account."
+            >
+              <ToggleRow
+                label="Enable 2FA"
+                description="Secure your account with two-factor authentication"
+              />
+            </SectionCard>
           </TabsContent>
 
           {/* ── AI Settings ──────────────────────────────────────────────── */}
-          <TabsContent value="ai">
-            <motion.div
-              initial={{ y: 20, opacity: 0 }}
-              animate={{ y: 0, opacity: 1 }}
-              className="space-y-6"
+          <TabsContent value="ai" className="space-y-6">
+            <SectionCard
+              title="AI receptionist configuration"
+              description="Customize how the AI greets callers and which call actions it can take on its own."
             >
-              <Card>
-                <CardHeader>
-                  <CardTitle>AI Receptionist Configuration</CardTitle>
-                  <CardDescription>
-                    Customize how the AI greets callers and which call actions it
-                    can take on its own.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <form onSubmit={onAiSubmit} className="space-y-6" noValidate>
-                    <div className="space-y-2">
-                      <Label htmlFor="ai-name">AI Assistant Name</Label>
-                      <Input
-                        id="ai-name"
-                        aria-invalid={!!aiForm.formState.errors.agentName}
-                        {...aiForm.register('agentName')}
-                      />
-                      {aiForm.formState.errors.agentName && (
-                        <p className="text-xs text-red-600">
-                          {aiForm.formState.errors.agentName.message}
-                        </p>
-                      )}
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="greeting">Greeting Message</Label>
-                      <Textarea
-                        id="greeting"
-                        rows={3}
-                        aria-invalid={!!aiForm.formState.errors.greetingMessage}
-                        {...aiForm.register('greetingMessage')}
-                      />
-                      {aiForm.formState.errors.greetingMessage && (
-                        <p className="text-xs text-red-600">
-                          {aiForm.formState.errors.greetingMessage.message}
-                        </p>
-                      )}
-                    </div>
-                    <div className="space-y-4">
-                      {[
-                        { key: 'autoBook' as const, label: 'Auto-Book Appointments', description: 'Allow AI to automatically book appointments' },
-                        { key: 'sendConfirmations' as const, label: 'Send Confirmations', description: 'Automatically send appointment confirmations' },
-                        { key: 'handleRescheduling' as const, label: 'Handle Rescheduling', description: 'Let AI manage appointment rescheduling' },
-                        { key: 'emergencyTransfer' as const, label: 'Emergency Transfers', description: 'Transfer emergency cases to staff immediately' },
-                      ].map((setting) => (
-                        <div key={setting.key} className="flex items-center justify-between p-4 bg-[#F7F9FB] rounded-lg">
-                          <div className="flex-1">
-                            <p className="font-medium text-[#333333]">{setting.label}</p>
-                            <p className="text-sm text-gray-600">{setting.description}</p>
-                          </div>
-                          <Switch
-                            checked={!!aiForm.watch(setting.key)}
-                            onCheckedChange={(checked) =>
-                              aiForm.setValue(setting.key, checked, { shouldDirty: true })
-                            }
-                          />
-                        </div>
-                      ))}
-                    </div>
-                    <Button
-                      type="submit"
-                      disabled={aiSubmitting}
-                      className="bg-[#2F80ED] hover:bg-[#2F80ED]/90"
-                    >
-                      <Save className="w-4 h-4 mr-2" />
-                      {aiSubmitting ? 'Saving...' : 'Save AI Settings'}
-                    </Button>
-                  </form>
-                </CardContent>
-              </Card>
-            </motion.div>
+              <form onSubmit={onAiSubmit} className="space-y-6" noValidate>
+                <div className="space-y-2">
+                  <Label htmlFor="ai-name">AI assistant name</Label>
+                  <Input
+                    id="ai-name"
+                    aria-invalid={!!aiForm.formState.errors.agentName}
+                    {...aiForm.register('agentName')}
+                  />
+                  <FieldError
+                    message={aiForm.formState.errors.agentName?.message}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="greeting">Greeting message</Label>
+                  <Textarea
+                    id="greeting"
+                    rows={3}
+                    aria-invalid={!!aiForm.formState.errors.greetingMessage}
+                    {...aiForm.register('greetingMessage')}
+                  />
+                  <FieldError
+                    message={aiForm.formState.errors.greetingMessage?.message}
+                  />
+                </div>
+                <div className="space-y-4">
+                  {[
+                    { key: 'autoBook' as const, label: 'Auto-book appointments', description: 'Allow AI to automatically book appointments' },
+                    { key: 'sendConfirmations' as const, label: 'Send confirmations', description: 'Automatically send appointment confirmations' },
+                    { key: 'handleRescheduling' as const, label: 'Handle rescheduling', description: 'Let AI manage appointment rescheduling' },
+                    { key: 'emergencyTransfer' as const, label: 'Emergency transfers', description: 'Transfer emergency cases to staff immediately' },
+                  ].map((setting) => (
+                    <ToggleRow
+                      key={setting.key}
+                      label={setting.label}
+                      description={setting.description}
+                      checked={!!aiForm.watch(setting.key)}
+                      onCheckedChange={(checked) =>
+                        aiForm.setValue(setting.key, checked, {
+                          shouldDirty: true,
+                        })
+                      }
+                    />
+                  ))}
+                </div>
+                <Button type="submit" disabled={aiSubmitting}>
+                  <Save />
+                  {aiSubmitting ? 'Saving…' : 'Save AI settings'}
+                </Button>
+              </form>
+            </SectionCard>
           </TabsContent>
 
           {/* ── Appearance Settings (UI-only) ────────────────────────────── */}
-          <TabsContent value="appearance">
-            <motion.div
-              initial={{ y: 20, opacity: 0 }}
-              animate={{ y: 0, opacity: 1 }}
-              className="space-y-6"
+          <TabsContent value="appearance" className="space-y-6">
+            <SectionCard
+              title="Theme & display"
+              description="Coming soon. These toggles aren’t persisted yet."
             >
-              <Card>
-                <CardHeader>
-                  <CardTitle>Theme & Display</CardTitle>
-                  <CardDescription>
-                    Coming soon. These toggles aren&apos;t persisted yet.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-6">
-                  <div className="space-y-4">
-                    {[
-                      { label: 'Dark Mode', description: 'Enable dark mode for better viewing in low light', defaultChecked: false },
-                      { label: 'Compact View', description: 'Show more information in less space', defaultChecked: false },
-                      { label: 'Animations', description: 'Enable smooth transitions and animations', defaultChecked: true },
-                    ].map((setting, index) => (
-                      <div key={index} className="flex items-center justify-between p-4 bg-[#F7F9FB] rounded-lg">
-                        <div className="flex-1">
-                          <p className="font-medium text-[#333333]">{setting.label}</p>
-                          <p className="text-sm text-gray-600">{setting.description}</p>
-                        </div>
-                        <Switch defaultChecked={setting.defaultChecked} />
-                      </div>
-                    ))}
-                  </div>
-                  <Button onClick={handleNotYetImplemented} className="bg-[#2F80ED] hover:bg-[#2F80ED]/90">
-                    <Save className="w-4 h-4 mr-2" />
-                    Save Appearance
-                  </Button>
-                </CardContent>
-              </Card>
-            </motion.div>
+              <div className="space-y-4">
+                {[
+                  { label: 'Dark mode', description: 'Enable dark mode for better viewing in low light', defaultChecked: false },
+                  { label: 'Compact view', description: 'Show more information in less space', defaultChecked: false },
+                  { label: 'Animations', description: 'Enable smooth transitions and animations', defaultChecked: true },
+                ].map((setting) => (
+                  <ToggleRow
+                    key={setting.label}
+                    label={setting.label}
+                    description={setting.description}
+                    defaultChecked={setting.defaultChecked}
+                  />
+                ))}
+                <Button onClick={handleNotYetImplemented}>
+                  <Save />
+                  Save appearance
+                </Button>
+              </div>
+            </SectionCard>
           </TabsContent>
         </Tabs>
       </div>

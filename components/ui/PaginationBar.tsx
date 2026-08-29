@@ -12,7 +12,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "./select";
-import { motion } from "motion/react";
 
 interface PaginationBarProps {
   currentPage: number;
@@ -32,10 +31,7 @@ export function PaginationBar({
   onItemsPerPageChange,
 }: PaginationBarProps) {
   const startItem = (currentPage - 1) * itemsPerPage + 1;
-  const endItem = Math.min(
-    currentPage * itemsPerPage,
-    totalItems,
-  );
+  const endItem = Math.min(currentPage * itemsPerPage, totalItems);
 
   // Don't show pagination if there are no items
   if (totalItems === 0) return null;
@@ -56,13 +52,11 @@ export function PaginationBar({
       } else if (currentPage >= totalPages - 2) {
         pages.push(1);
         pages.push("...");
-        for (let i = totalPages - 4; i <= totalPages; i++)
-          pages.push(i);
+        for (let i = totalPages - 4; i <= totalPages; i++) pages.push(i);
       } else {
         pages.push(1);
         pages.push("...");
-        for (let i = currentPage - 1; i <= currentPage + 1; i++)
-          pages.push(i);
+        for (let i = currentPage - 1; i <= currentPage + 1; i++) pages.push(i);
         pages.push("...");
         pages.push(totalPages);
       }
@@ -72,73 +66,52 @@ export function PaginationBar({
   };
 
   return (
-    <motion.div
-      initial={{ y: 20, opacity: 0 }}
-      animate={{ y: 0, opacity: 1 }}
-      className="mb-6 flex items-center justify-between px-6 py-4 bg-white rounded-xl border border-gray-200 shadow-sm"
-    >
-      <div className="text-sm text-gray-600">
+    <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-border bg-card px-6 py-4 shadow-sm">
+      <div className="text-sm text-muted-foreground">
         Showing{" "}
-        <span className="font-medium text-[#333333]">
-          {startItem}
-        </span>{" "}
-        to{" "}
-        <span className="font-medium text-[#333333]">
-          {endItem}
-        </span>{" "}
-        of{" "}
-        <span className="font-medium text-[#333333]">
-          {totalItems}
-        </span>{" "}
-        results
+        <span className="font-medium text-foreground">{startItem}</span> to{" "}
+        <span className="font-medium text-foreground">{endItem}</span> of{" "}
+        <span className="font-medium text-foreground">{totalItems}</span> results
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1.5">
         <Button
           variant="outline"
-          size="icon"
-          className="w-8 h-8"
+          size="icon-sm"
           onClick={() => onPageChange(1)}
           disabled={currentPage === 1}
+          aria-label="First page"
         >
-          <ChevronsLeft className="w-4 h-4" />
+          <ChevronsLeft />
         </Button>
 
         <Button
           variant="outline"
-          size="icon"
-          className="w-8 h-8"
+          size="icon-sm"
           onClick={() => onPageChange(currentPage - 1)}
           disabled={currentPage === 1}
+          aria-label="Previous page"
         >
-          <ChevronLeft className="w-4 h-4" />
+          <ChevronLeft />
         </Button>
 
         <div className="flex items-center gap-1">
           {getPageNumbers().map((page, index) =>
             typeof page === "number" ? (
-              <motion.div
+              <Button
                 key={index}
-                whileHover={{ scale: 1.1 }}
-                whileTap={{ scale: 0.95 }}
+                variant={page === currentPage ? "default" : "outline"}
+                size="icon-sm"
+                aria-current={page === currentPage ? "page" : undefined}
+                onClick={() => onPageChange(page)}
               >
-                <Button
-                  variant={
-                    page === currentPage ? "default" : "outline"
-                  }
-                  size="icon"
-                  className={`w-8 h-8 ${
-                    page === currentPage
-                      ? "bg-gradient-to-r from-[#2F80ED] to-[#56CCF2] text-white"
-                      : ""
-                  }`}
-                  onClick={() => onPageChange(page)}
-                >
-                  {page}
-                </Button>
-              </motion.div>
+                {page}
+              </Button>
             ) : (
-              <span key={index} className="px-2 text-gray-400">
+              <span
+                key={index}
+                className="px-1.5 text-sm text-muted-foreground"
+              >
                 {page}
               </span>
             ),
@@ -147,37 +120,33 @@ export function PaginationBar({
 
         <Button
           variant="outline"
-          size="icon"
-          className="w-8 h-8"
+          size="icon-sm"
           onClick={() => onPageChange(currentPage + 1)}
           disabled={currentPage === totalPages}
+          aria-label="Next page"
         >
-          <ChevronRight className="w-4 h-4" />
+          <ChevronRight />
         </Button>
 
         <Button
           variant="outline"
-          size="icon"
-          className="w-8 h-8"
+          size="icon-sm"
           onClick={() => onPageChange(totalPages)}
           disabled={currentPage === totalPages}
+          aria-label="Last page"
         >
-          <ChevronsRight className="w-4 h-4" />
+          <ChevronsRight />
         </Button>
       </div>
 
       {onItemsPerPageChange && (
         <div className="flex items-center gap-2">
-          <span className="text-sm text-gray-600">
-            Per page:
-          </span>
+          <span className="text-sm text-muted-foreground">Per page</span>
           <Select
             value={String(itemsPerPage)}
-            onValueChange={(value) =>
-              onItemsPerPageChange(Number(value))
-            }
+            onValueChange={(value) => onItemsPerPageChange(Number(value))}
           >
-            <SelectTrigger className="w-20 h-9">
+            <SelectTrigger className="h-9 w-20">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -189,6 +158,6 @@ export function PaginationBar({
           </Select>
         </div>
       )}
-    </motion.div>
+    </div>
   );
 }

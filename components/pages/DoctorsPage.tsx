@@ -13,15 +13,15 @@ import {
   Pencil,
   UserX,
 } from 'lucide-react';
-import { Card, CardContent } from '../ui/card';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
+import { SectionCard } from '../ui/section-card';
+import { EmptyState } from '../ui/empty-state';
 import { TopBar } from '../ui/TopBar';
 import { PaginationBar } from '../ui/PaginationBar';
 import { AddDoctorModal } from '../ui/AddDoctorModal';
 import { DoctorScheduleModal } from '../ui/DoctorScheduleModal';
 import { apiDelete, ApiError } from '@/lib/client/fetcher';
-import { motion } from 'motion/react';
 import type { Doctor } from '@prisma/client';
 
 interface DoctorsPageProps {
@@ -43,7 +43,6 @@ function initials(name: string): string {
 
 export function DoctorsPage({
   initialDoctors,
-  initialTotal,
   initialQuery = '',
 }: DoctorsPageProps) {
   const router = useRouter();
@@ -98,134 +97,123 @@ export function DoctorsPage({
   };
 
   return (
-    <div className="min-h-screen bg-[#F7F9FB]">
+    <div>
       <TopBar
         title="Doctors"
         description="Manage your clinic’s doctors and their working hours"
         actionButton={
-          <Button
-            className="bg-gradient-to-r from-[#2F80ED] to-[#56CCF2] hover:opacity-90 shadow-md"
-            onClick={() => setIsAddOpen(true)}
-          >
-            <Plus className="w-4 h-4 mr-2" />
-            Add Doctor
+          <Button onClick={() => setIsAddOpen(true)}>
+            <Plus />
+            Add doctor
           </Button>
         }
       />
 
-      <div className="p-8 max-w-7xl mx-auto space-y-8">
-        <motion.div
-          initial={{ y: -20, opacity: 0 }}
-          animate={{ y: 0, opacity: 1 }}
-          className="flex flex-col sm:flex-row gap-4"
-        >
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
-            <Input
-              placeholder="Search doctors by name or specialization..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-10 h-12"
-            />
-          </div>
-        </motion.div>
+      <div className="mx-auto max-w-7xl space-y-6 p-6">
+        {/* Search */}
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            placeholder="Search doctors by name or specialization…"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="pl-9"
+          />
+        </div>
 
+        {/* Doctors list */}
         {paginated.length === 0 ? (
-          <Card className="border-2 border-dashed border-gray-300">
-            <CardContent className="p-12 text-center">
-              <Stethoscope className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-              <h3 className="text-xl text-gray-600 mb-2">No doctors yet</h3>
-              <p className="text-gray-500 mb-6 max-w-md mx-auto">
-                {initialDoctors.length === 0
+          <SectionCard>
+            <EmptyState
+              icon={<Stethoscope />}
+              title="No doctors yet"
+              description={
+                initialDoctors.length === 0
                   ? 'Add your first doctor to start taking appointments. You’ll set their weekly working hours right after — that’s what powers booking and the AI receptionist.'
-                  : 'No doctors match your search.'}
-              </p>
-              <Button
-                className="bg-[#2F80ED] hover:bg-[#2F80ED]/90"
-                onClick={() => setIsAddOpen(true)}
-              >
-                <Plus className="w-4 h-4 mr-2" />
-                Add Doctor
-              </Button>
-            </CardContent>
-          </Card>
+                  : 'No doctors match your search.'
+              }
+              action={
+                <Button onClick={() => setIsAddOpen(true)}>
+                  <Plus />
+                  Add doctor
+                </Button>
+              }
+            />
+          </SectionCard>
         ) : (
-          <div className="space-y-4">
-            {paginated.map((doctor, index) => (
-              <motion.div
-                key={doctor.id}
-                initial={{ y: 20, opacity: 0 }}
-                animate={{ y: 0, opacity: 1 }}
-                transition={{ delay: index * 0.05 }}
-              >
-                <Card className="hover:shadow-lg transition-all">
-                  <CardContent className="p-6">
-                    <div className="flex items-start gap-6 flex-wrap">
-                      <div className="w-16 h-16 bg-gradient-to-br from-[#2F80ED] to-[#56CCF2] rounded-full flex items-center justify-center text-white text-xl shadow-md flex-shrink-0">
-                        {initials(doctor.name)}
+          <SectionCard noPadding>
+            <ul className="divide-y divide-border">
+              {paginated.map((doctor) => (
+                <li
+                  key={doctor.id}
+                  className="p-6 transition-colors hover:bg-muted/60"
+                >
+                  <div className="flex flex-wrap items-start gap-5">
+                    <div className="flex size-14 shrink-0 items-center justify-center rounded-full bg-primary-muted text-lg font-semibold text-primary">
+                      {initials(doctor.name)}
+                    </div>
+
+                    <div className="min-w-0 flex-1 space-y-3">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <h3 className="font-semibold text-foreground">
+                            {doctor.name}
+                          </h3>
+                          <p className="mt-0.5 text-sm font-medium text-primary">
+                            {doctor.specialization}
+                          </p>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setScheduleDoctor(doctor)}
+                          >
+                            <CalendarClock />
+                            Manage schedule
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setEditDoctor(doctor)}
+                          >
+                            <Pencil />
+                            Edit
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="text-destructive hover:border-destructive hover:bg-destructive hover:text-destructive-foreground"
+                            onClick={() => handleDeactivate(doctor)}
+                          >
+                            <UserX />
+                            Deactivate
+                          </Button>
+                        </div>
                       </div>
 
-                      <div className="flex-1 min-w-0 space-y-3">
-                        <div className="flex items-start justify-between flex-wrap gap-2">
-                          <div>
-                            <h3 className="text-xl text-[#333333] font-medium mb-1">
-                              {doctor.name}
-                            </h3>
-                            <p className="text-sm text-[#2F80ED]">
-                              {doctor.specialization}
-                            </p>
-                          </div>
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="hover:bg-[#2F80ED] hover:text-white transition-all"
-                              onClick={() => setScheduleDoctor(doctor)}
-                            >
-                              <CalendarClock className="w-4 h-4 mr-2" />
-                              Manage Schedule
-                            </Button>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => setEditDoctor(doctor)}
-                            >
-                              <Pencil className="w-4 h-4 mr-2" />
-                              Edit
-                            </Button>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="text-red-600 hover:bg-red-600 hover:text-white transition-all"
-                              onClick={() => handleDeactivate(doctor)}
-                            >
-                              <UserX className="w-4 h-4 mr-2" />
-                              Deactivate
-                            </Button>
-                          </div>
-                        </div>
-
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {(doctor.phone || doctor.email) && (
+                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                           {doctor.phone && (
-                            <div className="flex items-center gap-2 text-sm text-gray-600">
-                              <Phone className="w-4 h-4" />
+                            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                              <Phone className="size-4" />
                               {doctor.phone}
                             </div>
                           )}
                           {doctor.email && (
-                            <div className="flex items-center gap-2 text-sm text-gray-600">
-                              <Mail className="w-4 h-4" />
+                            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                              <Mail className="size-4" />
                               {doctor.email}
                             </div>
                           )}
                         </div>
-                      </div>
+                      )}
                     </div>
-                  </CardContent>
-                </Card>
-              </motion.div>
-            ))}
-          </div>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </SectionCard>
         )}
 
         {filteredDoctors.length > 0 && (
@@ -243,10 +231,9 @@ export function DoctorsPage({
         )}
 
         {isPending && (
-          <p className="text-center text-sm text-gray-400">Refreshing…</p>
-        )}
-        {initialTotal > 0 && (
-          <p className="sr-only">{initialTotal} doctors total</p>
+          <p className="text-center text-sm text-muted-foreground">
+            Refreshing…
+          </p>
         )}
       </div>
 

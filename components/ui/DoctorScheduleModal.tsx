@@ -51,15 +51,6 @@ const DAYS = [
 
 const SLOT_OPTIONS = [15, 20, 30, 45, 60];
 
-// Brand-blue checked state. The shadcn default `--primary` is near-black, and
-// overriding it with a Tailwind arbitrary-value class loses to tailwind-merge,
-// so we paint the checked state with an inline style instead — deterministic.
-const CHECKBOX_BRAND_STYLE = {
-  backgroundColor: '#2F80ED',
-  borderColor: '#2F80ED',
-  color: '#ffffff',
-} as const;
-
 interface DayRow {
   enabled: boolean;
   startTime: string;
@@ -265,18 +256,18 @@ export function DoctorScheduleModal({
   return (
     <Dialog open={isOpen} onOpenChange={(open) => (open ? null : onClose())}>
       <DialogContent className="sm:max-w-[680px] max-h-[85vh] p-0 gap-0 flex flex-col overflow-hidden">
-        <DialogHeader className="px-6 pt-6 pb-4 border-b shrink-0 text-left">
-          <DialogTitle className="text-lg">
+        <DialogHeader className="px-6 pt-6 pb-4 border-b border-border shrink-0 text-left">
+          <DialogTitle>
             Schedule{doctor ? ` · ${doctor.name}` : ''}
           </DialogTitle>
-          <DialogDescription className="text-sm">
+          <DialogDescription>
             Set weekly working hours and time off. This drives booking and the
             AI receptionist.
           </DialogDescription>
         </DialogHeader>
 
         {loading ? (
-          <div className="flex-1 flex items-center justify-center py-20 text-sm text-gray-400">
+          <div className="flex-1 flex items-center justify-center py-20 text-sm text-muted-foreground">
             Loading schedule…
           </div>
         ) : (
@@ -285,28 +276,26 @@ export function DoctorScheduleModal({
               {/* Weekly grid */}
               <section>
                 <div className="flex items-center justify-between mb-3">
-                  <h4 className="text-sm font-medium text-[#333333]">
+                  <h4 className="text-sm font-medium text-foreground">
                     Weekly working hours
                   </h4>
-                  <span className="text-xs text-gray-400">
+                  <span className="text-xs text-muted-foreground">
                     {enabledCount} {enabledCount === 1 ? 'day' : 'days'} open
                   </span>
                 </div>
 
-                <div className="rounded-xl border border-gray-200 divide-y divide-gray-100 overflow-hidden">
+                <div className="rounded-xl border border-border divide-y divide-border overflow-hidden">
                   {rows.map((row, dow) => (
                     <div
                       key={dow}
                       className={cn(
                         'px-3 py-2.5 transition-colors',
-                        row.enabled ? 'bg-white' : 'bg-gray-50/60',
+                        row.enabled ? 'bg-card' : 'bg-muted/50',
                       )}
                     >
                       <div className="flex items-center gap-3">
                         <label className="flex items-center gap-2.5 w-32 shrink-0 cursor-pointer">
                           <Checkbox
-                            className="border-gray-300"
-                            style={row.enabled ? CHECKBOX_BRAND_STYLE : undefined}
                             checked={row.enabled}
                             onCheckedChange={(v) =>
                               updateRow(dow, { enabled: !!v })
@@ -316,8 +305,8 @@ export function DoctorScheduleModal({
                             className={cn(
                               'text-sm',
                               row.enabled
-                                ? 'text-[#333333] font-medium'
-                                : 'text-gray-400',
+                                ? 'text-foreground font-medium'
+                                : 'text-muted-foreground',
                             )}
                           >
                             {DAYS[dow]}
@@ -333,16 +322,18 @@ export function DoctorScheduleModal({
                                 onChange={(e) =>
                                   updateRow(dow, { startTime: e.target.value })
                                 }
-                                className="h-9 w-[118px] text-sm"
+                                className="h-9 w-[118px]"
                               />
-                              <span className="text-gray-400 text-xs">to</span>
+                              <span className="text-muted-foreground text-xs">
+                                to
+                              </span>
                               <Input
                                 type="time"
                                 value={row.endTime}
                                 onChange={(e) =>
                                   updateRow(dow, { endTime: e.target.value })
                                 }
-                                className="h-9 w-[118px] text-sm"
+                                className="h-9 w-[118px]"
                               />
                             </div>
 
@@ -354,7 +345,7 @@ export function DoctorScheduleModal({
                                 })
                               }
                             >
-                              <SelectTrigger className="h-9 w-[112px] text-sm ml-auto">
+                              <SelectTrigger className="h-9 w-[112px] ml-auto">
                                 <SelectValue />
                               </SelectTrigger>
                               <SelectContent>
@@ -367,14 +358,14 @@ export function DoctorScheduleModal({
                             </Select>
                           </>
                         ) : (
-                          <span className="text-sm text-gray-400">
+                          <span className="text-sm text-muted-foreground">
                             Not working
                           </span>
                         )}
                       </div>
 
                       {rowErrors[dow] && (
-                        <p className="text-xs text-red-600 mt-1.5 ml-[136px]">
+                        <p className="text-xs text-destructive mt-1.5 ml-[136px]">
                           {rowErrors[dow]}
                         </p>
                       )}
@@ -385,13 +376,13 @@ export function DoctorScheduleModal({
 
               {/* Time off */}
               <section>
-                <h4 className="text-sm font-medium text-[#333333] mb-3">
+                <h4 className="text-sm font-medium text-foreground mb-3">
                   Time off
                 </h4>
 
                 {timeOff.length === 0 ? (
-                  <div className="flex items-center gap-2 rounded-lg bg-gray-50 px-3 py-3 text-sm text-gray-500">
-                    <CalendarOff className="w-4 h-4 text-gray-400" />
+                  <div className="flex items-center gap-2 rounded-lg bg-muted px-3 py-3 text-sm text-muted-foreground">
+                    <CalendarOff className="size-4" />
                     No time off scheduled.
                   </div>
                 ) : (
@@ -399,23 +390,26 @@ export function DoctorScheduleModal({
                     {timeOff.map((t) => (
                       <div
                         key={t.id}
-                        className="flex items-center justify-between rounded-lg bg-[#F7F9FB] px-3 py-2"
+                        className="flex items-center justify-between rounded-lg bg-muted px-3 py-2"
                       >
                         <div className="text-sm">
-                          <span className="text-[#333333]">
+                          <span className="text-foreground">
                             {fmtDate(t.startDate)} – {fmtDate(t.endDate)}
                           </span>
                           {t.reason && (
-                            <span className="text-gray-500"> · {t.reason}</span>
+                            <span className="text-muted-foreground">
+                              {' '}
+                              · {t.reason}
+                            </span>
                           )}
                         </div>
                         <Button
                           variant="ghost"
-                          size="sm"
-                          className="text-gray-400 hover:text-red-600 hover:bg-red-50 h-8 w-8 p-0"
+                          size="icon-sm"
+                          className="text-muted-foreground hover:bg-destructive-muted hover:text-destructive"
                           onClick={() => handleDeleteTimeOff(t.id)}
                         >
-                          <Trash2 className="w-4 h-4" />
+                          <Trash2 />
                         </Button>
                       </div>
                     ))}
@@ -423,33 +417,40 @@ export function DoctorScheduleModal({
                 )}
 
                 <div className="flex items-end gap-2 flex-wrap mt-3">
-                  <div className="space-y-1">
-                    <Label className="text-xs text-gray-500">From</Label>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="to-start" className="text-xs">
+                      From
+                    </Label>
                     <Input
+                      id="to-start"
                       type="date"
                       value={toStart}
                       onChange={(e) => setToStart(e.target.value)}
-                      className="h-9 text-sm w-[150px]"
+                      className="h-9 w-[150px]"
                     />
                   </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs text-gray-500">To</Label>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="to-end" className="text-xs">
+                      To
+                    </Label>
                     <Input
+                      id="to-end"
                       type="date"
                       value={toEnd}
                       onChange={(e) => setToEnd(e.target.value)}
-                      className="h-9 text-sm w-[150px]"
+                      className="h-9 w-[150px]"
                     />
                   </div>
-                  <div className="space-y-1 flex-1 min-w-[120px]">
-                    <Label className="text-xs text-gray-500">
+                  <div className="space-y-1.5 flex-1 min-w-[120px]">
+                    <Label htmlFor="to-reason" className="text-xs">
                       Reason (optional)
                     </Label>
                     <Input
+                      id="to-reason"
                       value={toReason}
                       onChange={(e) => setToReason(e.target.value)}
                       placeholder="Vacation"
-                      className="h-9 text-sm"
+                      className="h-9"
                     />
                   </div>
                   <Button
@@ -459,7 +460,7 @@ export function DoctorScheduleModal({
                     onClick={handleAddTimeOff}
                     disabled={addingTimeOff}
                   >
-                    <Plus className="w-4 h-4 mr-1" />
+                    <Plus />
                     Add
                   </Button>
                 </div>
@@ -467,19 +468,15 @@ export function DoctorScheduleModal({
             </div>
 
             {/* Sticky footer — the primary action is always reachable. */}
-            <DialogFooter className="px-6 py-4 border-t shrink-0 sm:justify-between items-center gap-3">
-              <p className="text-xs text-gray-400 hidden sm:block">
+            <DialogFooter className="px-6 py-4 border-t border-border shrink-0 sm:justify-between items-center gap-3">
+              <p className="text-xs text-muted-foreground hidden sm:block">
                 Times are in the clinic’s timezone.
               </p>
               <div className="flex gap-2">
                 <Button variant="outline" onClick={onClose} disabled={saving}>
                   Cancel
                 </Button>
-                <Button
-                  onClick={handleSaveSchedule}
-                  disabled={saving}
-                  className="bg-gradient-to-r from-[#2F80ED] to-[#56CCF2] hover:opacity-90"
-                >
+                <Button onClick={handleSaveSchedule} disabled={saving}>
                   {saving ? 'Saving…' : 'Save working hours'}
                 </Button>
               </div>

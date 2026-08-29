@@ -1,14 +1,76 @@
 'use client';
 
-import { useState, useTransition } from "react";
-import { Mail, Lock, User, Eye, EyeOff, Building2 } from "lucide-react";
-import { Button } from "../ui/button";
-import { Input } from "../ui/input";
-import { Label } from "../ui/label";
-import { AivaLogo } from "../ui/AivaLogo";
-import { motion, AnimatePresence } from "motion/react";
-import { toast } from "sonner";
-import { login, register } from "@/app/(auth)/actions";
+import { useState, useTransition } from 'react';
+import {
+  Mail,
+  Lock,
+  User,
+  Eye,
+  EyeOff,
+  Building2,
+  Check,
+  type LucideIcon,
+} from 'lucide-react';
+import { Button } from '../ui/button';
+import { Input } from '../ui/input';
+import { Label } from '../ui/label';
+import { AivaLogo } from '../ui/AivaLogo';
+import { cn } from '../ui/utils';
+import { toast } from 'sonner';
+import { login, register } from '@/app/(auth)/actions';
+
+const FEATURES = [
+  'AI receptionist for every incoming call',
+  'Automated booking, reschedule & cancellation',
+  'Patient records and schedules in one place',
+];
+
+// Icon-prefixed text field. Defined outside the component so it isn't
+// re-created each render; the password toggle is passed in via `trailing`
+// (it needs the parent's showPassword state).
+function Field({
+  id,
+  name,
+  label,
+  type = 'text',
+  placeholder,
+  icon: Icon,
+  required,
+  minLength,
+  autoComplete,
+  trailing,
+}: {
+  id: string;
+  name: string;
+  label: string;
+  type?: string;
+  placeholder?: string;
+  icon: LucideIcon;
+  required?: boolean;
+  minLength?: number;
+  autoComplete?: string;
+  trailing?: React.ReactNode;
+}) {
+  return (
+    <div className="space-y-2">
+      <Label htmlFor={id}>{label}</Label>
+      <div className="relative">
+        <Icon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          id={id}
+          name={name}
+          type={type}
+          placeholder={placeholder}
+          required={required}
+          minLength={minLength}
+          autoComplete={autoComplete}
+          className={cn('pl-9', trailing && 'pr-10')}
+        />
+        {trailing}
+      </div>
+    </div>
+  );
+}
 
 export function LoginPage() {
   const [isLogin, setIsLogin] = useState(true);
@@ -36,350 +98,211 @@ export function LoginPage() {
     });
   };
 
-  const toggleMode = () => {
-    setIsLogin(!isLogin);
-  };
+  const passwordToggle = (
+    <button
+      type="button"
+      onClick={() => setShowPassword((s) => !s)}
+      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground transition-colors hover:text-foreground"
+      aria-label={showPassword ? 'Hide password' : 'Show password'}
+    >
+      {showPassword ? (
+        <EyeOff className="size-4" />
+      ) : (
+        <Eye className="size-4" />
+      )}
+    </button>
+  );
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-[#2F80ED] via-[#56CCF2] to-[#27AE60] flex items-center justify-center p-4 overflow-hidden relative">
-      {/* Animated background elements */}
-      <motion.div
-        animate={{
-          scale: [1, 1.2, 1],
-          rotate: [0, 180, 360],
-        }}
-        transition={{
-          duration: 20,
-          repeat: Infinity,
-          ease: "linear",
-        }}
-        className="absolute top-10 left-10 w-72 h-72 bg-white/5 rounded-full blur-3xl"
-      />
-      <motion.div
-        animate={{
-          scale: [1.2, 1, 1.2],
-          rotate: [360, 180, 0],
-        }}
-        transition={{
-          duration: 15,
-          repeat: Infinity,
-          ease: "linear",
-        }}
-        className="absolute bottom-10 right-10 w-96 h-96 bg-white/5 rounded-full blur-3xl"
-      />
-
-      <div className="w-full max-w-6xl relative z-10">
+    <div className="grid min-h-screen lg:grid-cols-2">
+      {/* ── Brand panel — matches the deep-indigo sidebar rail ── */}
+      <div className="relative hidden overflow-hidden bg-sidebar p-12 text-sidebar-foreground lg:flex lg:flex-col lg:justify-between">
         <div
-          className={`grid ${isLogin ? "lg:grid-cols-2" : "lg:grid-cols-2"} gap-8 items-center`}
-        >
-          {/* Left side - Branding or Form based on mode */}
-          <AnimatePresence mode="wait">
-            {isLogin ? (
-              <motion.div
-                key="branding-left"
-                initial={{ opacity: 0, x: -50 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -50 }}
-                transition={{ duration: 0.5 }}
-                className="text-white space-y-8 hidden lg:flex flex-col justify-center items-center"
+          aria-hidden
+          className="pointer-events-none absolute -right-24 -top-24 size-96 rounded-full bg-white/5 blur-3xl"
+        />
+        <div
+          aria-hidden
+          className="pointer-events-none absolute -bottom-32 -left-20 size-[28rem] rounded-full bg-white/5 blur-3xl"
+        />
+
+        <div className="relative flex items-center gap-3">
+          <AivaLogo className="size-11" />
+          <span className="text-2xl font-semibold tracking-tight text-white">
+            Aiva
+          </span>
+        </div>
+
+        <div className="relative max-w-md space-y-6">
+          <h1 className="text-4xl font-semibold leading-tight tracking-tight text-white">
+            The AI receptionist your clinic deserves
+          </h1>
+          <p className="text-lg leading-relaxed text-sidebar-foreground">
+            Aiva answers every call, books and reschedules appointments, and
+            keeps your patient records in sync — so your front desk never misses
+            a patient.
+          </p>
+          <ul className="space-y-3">
+            {FEATURES.map((f) => (
+              <li key={f} className="flex items-center gap-3 text-sidebar-foreground">
+                <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-white/10 text-white">
+                  <Check className="size-3.5" />
+                </span>
+                {f}
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        <p className="relative text-sm text-sidebar-foreground/70">
+          Trusted to handle patient calls around the clock.
+        </p>
+      </div>
+
+      {/* ── Form panel ── */}
+      <div className="flex items-center justify-center bg-background p-6 sm:p-10">
+        <div className="w-full max-w-md">
+          {/* Logo for mobile (brand panel is hidden below lg) */}
+          <div className="mb-8 flex items-center justify-center gap-3 lg:hidden">
+            <AivaLogo className="size-10" />
+            <span className="text-2xl font-semibold tracking-tight text-foreground">
+              Aiva
+            </span>
+          </div>
+
+          {/* Segmented Login / Register toggle */}
+          <div className="mb-8 inline-flex w-full rounded-lg bg-muted p-1">
+            <button
+              type="button"
+              onClick={() => setIsLogin(true)}
+              className={cn(
+                'flex-1 rounded-md py-2 text-sm font-medium transition-colors',
+                isLogin
+                  ? 'bg-card text-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground',
+              )}
+            >
+              Login
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsLogin(false)}
+              className={cn(
+                'flex-1 rounded-md py-2 text-sm font-medium transition-colors',
+                !isLogin
+                  ? 'bg-card text-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground',
+              )}
+            >
+              Register
+            </button>
+          </div>
+
+          <div className="mb-8">
+            <h2 className="text-2xl font-semibold tracking-tight text-foreground">
+              {isLogin ? 'Welcome back' : 'Create your account'}
+            </h2>
+            <p className="mt-1.5 text-sm text-muted-foreground">
+              {isLogin
+                ? 'Log in to access your clinic dashboard.'
+                : 'Register your clinic to get started with Aiva.'}
+            </p>
+          </div>
+
+          {isLogin ? (
+            <form action={handleLogin} className="space-y-5">
+              <Field
+                id="email"
+                name="email"
+                label="Email address"
+                type="email"
+                placeholder="doctor@clinic.com"
+                icon={Mail}
+                required
+                autoComplete="email"
+              />
+              <Field
+                id="password"
+                name="password"
+                label="Password"
+                type={showPassword ? 'text' : 'password'}
+                placeholder="••••••••"
+                icon={Lock}
+                required
+                autoComplete="current-password"
+                trailing={passwordToggle}
+              />
+
+              {/* Remember-me + Forgot password are intentionally hidden until
+                  they're actually wired. Showing them as no-ops trains users to
+                  expect features that don't exist. Session lifetime is owned by
+                  Supabase today; password reset will land in a follow-up. */}
+
+              <Button
+                type="submit"
+                size="lg"
+                className="w-full"
+                disabled={isPending}
               >
-                <motion.div
-                  whileHover={{ scale: 1.05 }}
-                  className="flex flex-col items-center gap-4"
-                >
-                  <AivaLogo className="w-32 h-32" />
-                  <h1 className="text-6xl">Aiva</h1>
-                </motion.div>
-              </motion.div>
-            ) : (
-              <motion.div
-                key="form-left"
-                initial={{ opacity: 0, rotateY: -90, x: 100 }}
-                animate={{ opacity: 1, rotateY: 0, x: 0 }}
-                exit={{ opacity: 0, rotateY: 90, x: -100 }}
-                transition={{
-                  duration: 0.2,
-                  ease: [0.43, 0.13, 0.23, 0.96],
-                }}
-                style={{ transformStyle: "preserve-3d" }}
-                className="hidden lg:flex justify-center"
+                {isPending ? 'Signing in…' : 'Log in'}
+              </Button>
+            </form>
+          ) : (
+            <form action={handleRegister} className="space-y-5">
+              <Field
+                id="name"
+                name="fullName"
+                label="Full name"
+                placeholder="Dr. Sarah Wilson"
+                icon={User}
+                required
+                autoComplete="name"
+              />
+              <Field
+                id="email"
+                name="email"
+                label="Email address"
+                type="email"
+                placeholder="doctor@clinic.com"
+                icon={Mail}
+                required
+                autoComplete="email"
+              />
+              <Field
+                id="clinicName"
+                name="clinicName"
+                label="Clinic name"
+                placeholder="Wilson Family Clinic"
+                icon={Building2}
+                required
+                autoComplete="organization"
+              />
+              <p className="text-xs text-muted-foreground">
+                You’ll add your clinic details, doctors, and team right after —
+                this just creates your account.
+              </p>
+              <Field
+                id="password"
+                name="password"
+                label="Password"
+                type={showPassword ? 'text' : 'password'}
+                placeholder="••••••••"
+                icon={Lock}
+                required
+                minLength={8}
+                autoComplete="new-password"
+                trailing={passwordToggle}
+              />
+              <Button
+                type="submit"
+                size="lg"
+                className="w-full"
+                disabled={isPending}
               >
-                <div className="bg-white/95 backdrop-blur-xl rounded-3xl shadow-2xl p-8 lg:p-12 w-full max-w-md">
-                  {/* Tab selector at top */}
-                  <div className="flex gap-2 mb-8 p-1 bg-gray-100 rounded-full">
-                    <button
-                      onClick={() => setIsLogin(false)}
-                      className="flex-1 py-2 px-4 rounded-full text-sm font-medium bg-gradient-to-r from-[#27AE60] to-[#56CCF2] text-white"
-                    >
-                      Register
-                    </button>
-                    <button
-                      onClick={() => setIsLogin(true)}
-                      className="flex-1 py-2 px-4 rounded-full text-sm font-medium text-gray-600 hover:bg-white transition-all"
-                    >
-                      Login
-                    </button>
-                  </div>
-
-                  <motion.div
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.1 }}
-                  >
-                    <h2 className="text-3xl text-[#333333] mb-2">
-                      Create Account
-                    </h2>
-                    <p className="text-gray-600 mb-8">
-                      Register your clinic to get started
-                    </p>
-
-                    <form action={handleRegister} className="space-y-6">
-                      <div className="space-y-2">
-                        <Label htmlFor="name">Full Name</Label>
-                        <div className="relative">
-                          <User className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
-                          <Input
-                            id="name"
-                            name="fullName"
-                            type="text"
-                            placeholder="Dr. Sarah Wilson"
-                            className="pl-10 h-12"
-                            required
-                          />
-                        </div>
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label htmlFor="email">
-                          Email Address
-                        </Label>
-                        <div className="relative">
-                          <Mail className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
-                          <Input
-                            id="email"
-                            name="email"
-                            type="email"
-                            placeholder="doctor@clinic.com"
-                            className="pl-10 h-12"
-                            required
-                          />
-                        </div>
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label htmlFor="clinicName">Clinic Name</Label>
-                        <div className="relative">
-                          <Building2 className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
-                          <Input
-                            id="clinicName"
-                            name="clinicName"
-                            type="text"
-                            placeholder="Wilson Family Clinic"
-                            className="pl-10 h-12"
-                            required
-                          />
-                        </div>
-                      </div>
-
-                      <p className="text-xs text-gray-500 -mt-2">
-                        You’ll add your clinic details, doctors, and team right
-                        after — this just creates your account.
-                      </p>
-
-                      <div className="space-y-2">
-                        <Label htmlFor="password">
-                          Password
-                        </Label>
-                        <div className="relative">
-                          <Lock className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
-                          <Input
-                            id="password"
-                            name="password"
-                            minLength={8}
-                            type={
-                              showPassword ? "text" : "password"
-                            }
-                            placeholder="••••••••"
-                            className="pl-10 pr-10 h-12"
-                            required
-                          />
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setShowPassword(!showPassword)
-                            }
-                            className="absolute right-3 top-3 text-gray-400 hover:text-gray-600"
-                          >
-                            {showPassword ? (
-                              <EyeOff className="w-5 h-5" />
-                            ) : (
-                              <Eye className="w-5 h-5" />
-                            )}
-                          </button>
-                        </div>
-                      </div>
-
-                      <motion.div
-                        whileHover={{ scale: 1.02 }}
-                        whileTap={{ scale: 0.98 }}
-                      >
-                        <Button
-                          type="submit"
-                          disabled={isPending}
-                          className="w-full h-12 text-lg bg-gradient-to-r from-[#27AE60] to-[#56CCF2] hover:opacity-90 shadow-lg"
-                        >
-                          {isPending ? "Creating…" : "Create Account"}
-                        </Button>
-                      </motion.div>
-                    </form>
-                  </motion.div>
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-
-          {/* Right side - Form or Branding based on mode */}
-          <AnimatePresence mode="wait">
-            {isLogin ? (
-              <motion.div
-                key="form-right"
-                initial={{ opacity: 0, rotateY: -90, x: 100 }}
-                animate={{ opacity: 1, rotateY: 0, x: 0 }}
-                exit={{ opacity: 0, rotateY: 90, x: -100 }}
-                transition={{
-                  duration: 0.2,
-                  ease: [0.43, 0.13, 0.23, 0.96],
-                }}
-                style={{ transformStyle: "preserve-3d" }}
-              >
-                <div className="bg-white/95 backdrop-blur-xl rounded-3xl shadow-2xl p-8 lg:p-12">
-                  {/* Logo for mobile */}
-                  <div className="lg:hidden flex flex-col items-center gap-3 mb-8">
-                    <AivaLogo className="w-16 h-16" />
-                    <h1 className="text-3xl text-[#333333]">
-                      Aiva
-                    </h1>
-                  </div>
-
-                  {/* Tab selector at top */}
-                  <div className="flex gap-2 mb-8 p-1 bg-gray-100 rounded-full">
-                    <button
-                      onClick={() => setIsLogin(false)}
-                      className="flex-1 py-2 px-4 rounded-full text-sm font-medium text-gray-600 hover:bg-white transition-all"
-                    >
-                      Register
-                    </button>
-                    <button
-                      onClick={() => setIsLogin(true)}
-                      className="flex-1 py-2 px-4 rounded-full text-sm font-medium bg-gradient-to-r from-[#2F80ED] to-[#56CCF2] text-white"
-                    >
-                      Login
-                    </button>
-                  </div>
-
-                  <motion.div
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.1 }}
-                  >
-                    <h2 className="text-3xl text-[#333333] mb-2">
-                      Welcome Back
-                    </h2>
-                    <p className="text-gray-600 mb-8">
-                      Login to access your dashboard
-                    </p>
-
-                    <form action={handleLogin} className="space-y-6">
-                      <div className="space-y-2">
-                        <Label htmlFor="email">
-                          Email Address
-                        </Label>
-                        <div className="relative">
-                          <Mail className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
-                          <Input
-                            id="email"
-                            name="email"
-                            type="email"
-                            placeholder="doctor@clinic.com"
-                            className="pl-10 h-12"
-                            required
-                          />
-                        </div>
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label htmlFor="password">
-                          Password
-                        </Label>
-                        <div className="relative">
-                          <Lock className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
-                          <Input
-                            id="password"
-                            name="password"
-                            type={
-                              showPassword ? "text" : "password"
-                            }
-                            placeholder="••••••••"
-                            className="pl-10 pr-10 h-12"
-                            required
-                          />
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setShowPassword(!showPassword)
-                            }
-                            className="absolute right-3 top-3 text-gray-400 hover:text-gray-600"
-                          >
-                            {showPassword ? (
-                              <EyeOff className="w-5 h-5" />
-                            ) : (
-                              <Eye className="w-5 h-5" />
-                            )}
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* Remember-me + Forgot password are intentionally
-                          hidden until they're actually wired. Showing them
-                          as no-ops trains users to expect features that
-                          don't exist. Session lifetime is owned by Supabase
-                          today; password reset will land in a follow-up. */}
-
-                      <motion.div
-                        whileHover={{ scale: 1.02 }}
-                        whileTap={{ scale: 0.98 }}
-                      >
-                        <Button
-                          type="submit"
-                          disabled={isPending}
-                          className="w-full h-12 text-lg bg-gradient-to-r from-[#2F80ED] to-[#56CCF2] hover:opacity-90 shadow-lg"
-                        >
-                          {isPending ? "Signing in…" : "Login"}
-                        </Button>
-                      </motion.div>
-                    </form>
-                  </motion.div>
-                </div>
-              </motion.div>
-            ) : (
-              <motion.div
-                key="branding-right"
-                initial={{ opacity: 0, x: 50 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: 50 }}
-                transition={{ duration: 0.5 }}
-                className="text-white space-y-8 hidden lg:flex flex-col justify-center items-center"
-              >
-                <motion.div
-                  whileHover={{ scale: 1.05 }}
-                  className="flex flex-col items-center gap-4"
-                >
-                  <AivaLogo className="w-32 h-32" />
-                  <h1 className="text-6xl">Aiva</h1>
-                </motion.div>
-              </motion.div>
-            )}
-          </AnimatePresence>
+                {isPending ? 'Creating…' : 'Create account'}
+              </Button>
+            </form>
+          )}
         </div>
       </div>
     </div>

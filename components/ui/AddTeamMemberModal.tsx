@@ -139,55 +139,48 @@ export function AddTeamMemberModal({
         {credentials ? (
           <>
             <DialogHeader>
-              <DialogTitle className="text-xl flex items-center gap-2">
-                <KeyRound className="w-5 h-5 text-[#2F80ED]" />
+              <DialogTitle className="flex items-center gap-2">
+                <KeyRound className="size-5 text-primary" />
                 Member added
               </DialogTitle>
-              <DialogDescription className="text-sm">
+              <DialogDescription>
                 Share these login details with {credentials.email}. The
                 temporary password won’t be shown again — they can change it
                 after logging in.
               </DialogDescription>
             </DialogHeader>
 
-            <div className="mt-3 space-y-3">
-              <div className="rounded-lg border border-gray-200 bg-[#F7F9FB] p-4 space-y-2">
+            <div className="mt-4 space-y-3">
+              <div className="space-y-2 rounded-lg border border-border bg-muted p-4">
                 <div className="flex justify-between text-sm">
-                  <span className="text-gray-500">Email</span>
-                  <span className="font-medium text-[#333333]">
+                  <span className="text-muted-foreground">Email</span>
+                  <span className="font-medium text-foreground">
                     {credentials.email}
                   </span>
                 </div>
                 <div className="flex justify-between text-sm">
-                  <span className="text-gray-500">Temp password</span>
-                  <span className="font-mono font-medium text-[#333333]">
+                  <span className="text-muted-foreground">Temp password</span>
+                  <span className="font-mono font-medium text-foreground">
                     {credentials.tempPassword}
                   </span>
                 </div>
               </div>
 
-              <Button
-                variant="outline"
-                className="w-full"
-                onClick={handleCopy}
-              >
+              <Button variant="outline" className="w-full" onClick={handleCopy}>
                 {copied ? (
                   <>
-                    <Check className="w-4 h-4 mr-2 text-green-600" />
+                    <Check className="text-success" />
                     Copied
                   </>
                 ) : (
                   <>
-                    <Copy className="w-4 h-4 mr-2" />
+                    <Copy />
                     Copy login details
                   </>
                 )}
               </Button>
 
-              <Button
-                className="w-full bg-gradient-to-r from-[#2F80ED] to-[#56CCF2] hover:opacity-90"
-                onClick={handleDismissCredentials}
-              >
+              <Button className="w-full" onClick={handleDismissCredentials}>
                 Done
               </Button>
             </div>
@@ -195,62 +188,54 @@ export function AddTeamMemberModal({
         ) : (
           <>
             <DialogHeader>
-              <DialogTitle className="text-xl">Invite Team Member</DialogTitle>
-              <DialogDescription className="text-sm">
+              <DialogTitle>Invite team member</DialogTitle>
+              <DialogDescription>
                 Create a dashboard login. We’ll generate a temporary password
                 for you to share.
               </DialogDescription>
             </DialogHeader>
 
-            <form onSubmit={onSubmit} className="space-y-3 mt-3" noValidate>
-              <div className="space-y-1">
-                <Label htmlFor="fullName" className="text-xs">
-                  Full Name
-                </Label>
+            <form onSubmit={onSubmit} className="mt-4 space-y-4" noValidate>
+              <div className="space-y-1.5">
+                <Label htmlFor="fullName">Full name</Label>
                 <Input
                   id="fullName"
                   placeholder="Jane Doe"
-                  className="h-10 text-sm"
                   aria-invalid={!!form.formState.errors.fullName}
                   {...form.register('fullName')}
                 />
                 {form.formState.errors.fullName && (
-                  <p className="text-xs text-red-600">
+                  <p className="text-xs text-destructive">
                     {form.formState.errors.fullName.message}
                   </p>
                 )}
               </div>
 
-              <div className="space-y-1">
-                <Label htmlFor="email" className="text-xs">
-                  Email
-                </Label>
+              <div className="space-y-1.5">
+                <Label htmlFor="email">Email</Label>
                 <Input
                   id="email"
                   type="email"
                   placeholder="jane@clinic.com"
-                  className="h-10 text-sm"
                   aria-invalid={!!form.formState.errors.email}
                   {...form.register('email')}
                 />
                 {form.formState.errors.email && (
-                  <p className="text-xs text-red-600">
+                  <p className="text-xs text-destructive">
                     {form.formState.errors.email.message}
                   </p>
                 )}
               </div>
 
-              <div className="space-y-1">
-                <Label htmlFor="role" className="text-xs">
-                  Role
-                </Label>
+              <div className="space-y-1.5">
+                <Label htmlFor="role">Role</Label>
                 <Select
                   value={form.watch('role')}
                   onValueChange={(val) =>
                     form.setValue('role', val as StaffRole)
                   }
                 >
-                  <SelectTrigger className="h-10 text-sm">
+                  <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -263,49 +248,37 @@ export function AddTeamMemberModal({
                 </Select>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <Label htmlFor="jobTitle" className="text-xs">
-                    Job Title (Optional)
-                  </Label>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <Label htmlFor="jobTitle">Job title (optional)</Label>
                   <Input
                     id="jobTitle"
                     placeholder="Practice Manager"
-                    className="h-10 text-sm"
                     {...form.register('jobTitle')}
                   />
                 </div>
-                <div className="space-y-1">
-                  <Label htmlFor="phone" className="text-xs">
-                    Phone (Optional)
-                  </Label>
+                <div className="space-y-1.5">
+                  <Label htmlFor="phone">Phone (optional)</Label>
                   <Input
                     id="phone"
                     placeholder="555-0101"
-                    className="h-10 text-sm"
                     {...form.register('phone')}
                   />
                 </div>
               </div>
 
-              <div className="flex gap-2 pt-3">
+              <div className="flex gap-3 pt-2">
                 <Button
                   type="button"
                   variant="outline"
                   onClick={onClose}
-                  size="sm"
-                  className="flex-1 text-xs"
+                  className="flex-1"
                   disabled={isSubmitting}
                 >
                   Cancel
                 </Button>
-                <Button
-                  type="submit"
-                  size="sm"
-                  className="flex-1 bg-gradient-to-r from-[#2F80ED] to-[#56CCF2] hover:opacity-90 text-xs"
-                  disabled={isSubmitting}
-                >
-                  {isSubmitting ? 'Creating…' : 'Create Login'}
+                <Button type="submit" className="flex-1" disabled={isSubmitting}>
+                  {isSubmitting ? 'Creating…' : 'Create login'}
                 </Button>
               </div>
             </form>

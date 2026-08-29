@@ -9,8 +9,8 @@ export function AivaLogo({ className = "w-10 h-10", version }: { className?: str
       {/* Circular background with gradient */}
       <defs>
         <linearGradient id="aivaGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stopColor="#2F80ED" />
-          <stop offset="100%" stopColor="#56CCF2" />
+          <stop offset="0%" stopColor="#4F46E5" />
+          <stop offset="100%" stopColor="#0D9488" />
         </linearGradient>
       </defs>
       

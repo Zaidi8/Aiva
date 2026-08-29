@@ -4,7 +4,6 @@
 // existing /api/dashboard-summary payload (no extra fetch) and renders the
 // remaining steps with a CTA each. Auto-hides once every step is complete.
 
-import { motion } from 'motion/react';
 import {
   Stethoscope,
   CalendarClock,
@@ -15,8 +14,9 @@ import {
   Circle,
   ArrowRight,
 } from 'lucide-react';
-import { Card, CardContent } from './card';
+import { SectionCard } from './section-card';
 import { Button } from './button';
+import { cn } from './utils';
 
 interface OnboardingChecklistProps {
   doctorCount: number;
@@ -85,78 +85,81 @@ export function OnboardingChecklist({
   const pct = Math.round((completed / steps.length) * 100);
 
   return (
-    <motion.div
-      initial={{ y: 20, opacity: 0 }}
-      animate={{ y: 0, opacity: 1 }}
+    <SectionCard
+      title="Finish setting up your clinic"
+      description="A few quick steps and your AI receptionist is ready to take calls."
+      action={
+        <span className="text-sm font-medium text-muted-foreground">
+          {completed} of {steps.length} done
+        </span>
+      }
     >
-      <Card className="border-none shadow-lg overflow-hidden">
-        <CardContent className="p-6">
-          <div className="flex items-center justify-between mb-1 flex-wrap gap-2">
-            <h2 className="text-xl text-[#333333]">Finish setting up your clinic</h2>
-            <span className="text-sm text-gray-500">
-              {completed} of {steps.length} done
-            </span>
-          </div>
-          <p className="text-sm text-gray-500 mb-4">
-            A few quick steps and your AI receptionist is ready to take calls.
-          </p>
+      {/* progress bar */}
+      <div
+        className="mb-5 h-2 w-full overflow-hidden rounded-full bg-secondary"
+        role="progressbar"
+        aria-valuenow={pct}
+        aria-valuemin={0}
+        aria-valuemax={100}
+      >
+        <div
+          className="h-full rounded-full bg-primary transition-all duration-500"
+          style={{ width: `${pct}%` }}
+        />
+      </div>
 
-          {/* progress bar */}
-          <div className="h-2 w-full rounded-full bg-gray-100 mb-5 overflow-hidden">
+      <div className="space-y-2">
+        {steps.map((step, i) => {
+          const StepIcon = step.icon;
+          return (
             <div
-              className="h-full bg-gradient-to-r from-[#2F80ED] to-[#56CCF2] transition-all"
-              style={{ width: `${pct}%` }}
-            />
-          </div>
-
-          <div className="space-y-2">
-            {steps.map((step, i) => (
-              <div
-                key={i}
-                className={`flex items-center gap-4 rounded-xl p-3 transition-colors ${
-                  step.done ? 'bg-[#27AE60]/5' : 'bg-[#F7F9FB] hover:bg-gray-100'
-                }`}
-              >
-                {step.done ? (
-                  <CheckCircle2 className="w-6 h-6 text-[#27AE60] flex-shrink-0" />
-                ) : (
-                  <Circle className="w-6 h-6 text-gray-300 flex-shrink-0" />
+              key={i}
+              className={cn(
+                'flex items-center gap-4 rounded-lg p-3 transition-colors',
+                step.done ? 'bg-success-muted/60' : 'bg-muted hover:bg-accent',
+              )}
+            >
+              {step.done ? (
+                <CheckCircle2 className="size-5 shrink-0 text-success" />
+              ) : (
+                <Circle className="size-5 shrink-0 text-muted-foreground/40" />
+              )}
+              <StepIcon
+                className={cn(
+                  'size-5 shrink-0',
+                  step.done ? 'text-success' : 'text-primary',
                 )}
-                <step.icon
-                  className={`w-5 h-5 flex-shrink-0 ${
-                    step.done ? 'text-[#27AE60]' : 'text-[#2F80ED]'
-                  }`}
-                />
-                <div className="flex-1 min-w-0">
-                  <p
-                    className={`text-sm font-medium ${
-                      step.done
-                        ? 'text-gray-400 line-through'
-                        : 'text-[#333333]'
-                    }`}
-                  >
-                    {step.label}
-                  </p>
-                  {!step.done && (
-                    <p className="text-xs text-gray-500">{step.hint}</p>
+              />
+              <div className="min-w-0 flex-1">
+                <p
+                  className={cn(
+                    'text-sm font-medium',
+                    step.done
+                      ? 'text-muted-foreground line-through'
+                      : 'text-foreground',
                   )}
-                </div>
+                >
+                  {step.label}
+                </p>
                 {!step.done && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="hover:bg-[#2F80ED] hover:text-white transition-all flex-shrink-0"
-                    onClick={step.go}
-                  >
-                    {step.cta}
-                    <ArrowRight className="w-4 h-4 ml-1" />
-                  </Button>
+                  <p className="text-xs text-muted-foreground">{step.hint}</p>
                 )}
               </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
-    </motion.div>
+              {!step.done && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="shrink-0"
+                  onClick={step.go}
+                >
+                  {step.cta}
+                  <ArrowRight />
+                </Button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </SectionCard>
   );
 }

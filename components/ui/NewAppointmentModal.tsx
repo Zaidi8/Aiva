@@ -276,14 +276,14 @@ export function NewAppointmentModal({
     <Dialog open={isOpen} onOpenChange={(open) => (open ? null : onClose())}>
       <DialogContent className="sm:max-w-[560px] max-h-[88vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>New Appointment</DialogTitle>
+          <DialogTitle>New appointment</DialogTitle>
           <DialogDescription>
             Schedule a new appointment for a patient
           </DialogDescription>
         </DialogHeader>
 
         {doctorEmpty && (
-          <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-3 text-xs text-amber-800">
+          <div className="rounded-lg border border-warning/30 bg-warning-muted px-3 py-3 text-xs text-warning-muted-foreground">
             <p className="mb-2">
               You don&apos;t have any doctors set up yet. Add a doctor and set
               their working hours before booking an appointment.
@@ -291,19 +291,18 @@ export function NewAppointmentModal({
             <Button
               type="button"
               size="sm"
-              className="bg-amber-600 hover:bg-amber-700 text-white"
               onClick={() => {
                 onClose();
                 router.push('/doctors');
               }}
             >
-              Go to Doctors
-              <ArrowRight className="w-4 h-4 ml-1" />
+              Go to doctors
+              <ArrowRight />
             </Button>
           </div>
         )}
         {doctorsError && (
-          <div className="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-700">
+          <div className="rounded-lg border border-destructive/30 bg-destructive-muted px-3 py-2 text-xs text-destructive-muted-foreground">
             {doctorsError}
           </div>
         )}
@@ -313,12 +312,12 @@ export function NewAppointmentModal({
           <div className="space-y-2">
             <Label htmlFor="patient">Patient</Label>
             {selectedPatient ? (
-              <div className="flex items-center justify-between rounded-md border bg-gray-50 px-3 py-2 text-sm">
+              <div className="flex items-center justify-between rounded-md border border-border bg-muted px-3 py-2 text-sm">
                 <div>
-                  <p className="font-medium text-[#333333]">
+                  <p className="font-medium text-foreground">
                     {selectedPatient.fullName}
                   </p>
-                  <p className="text-xs text-gray-500">
+                  <p className="text-xs text-muted-foreground">
                     {selectedPatient.phoneNumber}
                   </p>
                 </div>
@@ -330,7 +329,6 @@ export function NewAppointmentModal({
                     setSelectedPatient(null);
                     setPatientQuery('');
                   }}
-                  className="text-xs"
                 >
                   Change
                 </Button>
@@ -338,39 +336,43 @@ export function NewAppointmentModal({
             ) : (
               <>
                 <div className="relative">
-                  <Search className="absolute left-3 top-3 w-4 h-4 text-gray-400" />
+                  <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
                   <Input
                     id="patient"
                     placeholder="Search by name or phone..."
                     value={patientQuery}
                     onChange={(e) => setPatientQuery(e.target.value)}
-                    className="pl-9 h-10"
+                    className="pl-9"
                   />
                 </div>
                 {patientList.length > 0 && (
-                  <div className="max-h-40 overflow-y-auto rounded-md border bg-white shadow-sm">
+                  <div className="max-h-40 overflow-y-auto rounded-md border border-border bg-popover shadow-sm">
                     {patientList.map((p) => (
                       <button
                         type="button"
                         key={p.id}
                         onClick={() => setSelectedPatient(p)}
-                        className="w-full text-left px-3 py-2 hover:bg-gray-50 text-sm border-b last:border-b-0"
+                        className="w-full border-b border-border px-3 py-2 text-left text-sm last:border-b-0 hover:bg-muted"
                       >
-                        <p className="font-medium text-[#333333]">{p.fullName}</p>
-                        <p className="text-xs text-gray-500">{p.phoneNumber}</p>
+                        <p className="font-medium text-foreground">
+                          {p.fullName}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {p.phoneNumber}
+                        </p>
                       </button>
                     ))}
                   </div>
                 )}
                 {patientList.length === 0 && !patientsLoading && (
-                  <p className="text-xs text-gray-500">
+                  <p className="text-xs text-muted-foreground">
                     No patients match. Add one in the Patients section first.
                   </p>
                 )}
               </>
             )}
             {errors.patientId && (
-              <p className="text-xs text-red-600">{errors.patientId}</p>
+              <p className="text-xs text-destructive">{errors.patientId}</p>
             )}
           </div>
 
@@ -398,7 +400,7 @@ export function NewAppointmentModal({
               </SelectContent>
             </Select>
             {errors.doctorId && (
-              <p className="text-xs text-red-600">{errors.doctorId}</p>
+              <p className="text-xs text-destructive">{errors.doctorId}</p>
             )}
           </div>
 
@@ -413,7 +415,7 @@ export function NewAppointmentModal({
                     variant="outline"
                     className="w-full justify-start text-left font-normal"
                   >
-                    <CalendarIcon className="mr-2 h-4 w-4" />
+                    <CalendarIcon />
                     {date ? format(date, 'PPP') : <span>Pick a date</span>}
                   </Button>
                 </PopoverTrigger>
@@ -459,12 +461,12 @@ export function NewAppointmentModal({
                 </SelectContent>
               </Select>
               {errors.slot && (
-                <p className="text-xs text-red-600">{errors.slot}</p>
+                <p className="text-xs text-destructive">{errors.slot}</p>
               )}
               {selectedDoctorId &&
                 !slotsLoading &&
                 slots.length === 0 && (
-                  <p className="text-[10px] text-gray-500">
+                  <p className="text-xs text-muted-foreground">
                     Doctor has no availability on this day, or every slot is
                     already booked. Try another date.
                   </p>
@@ -474,7 +476,7 @@ export function NewAppointmentModal({
 
           {/* ── Type ── */}
           <div className="space-y-2">
-            <Label htmlFor="type">Appointment Type</Label>
+            <Label htmlFor="type">Appointment type</Label>
             <Select
               value={selectedType}
               onValueChange={(v) => setSelectedType(v as AppointmentTypeValue)}
@@ -491,13 +493,13 @@ export function NewAppointmentModal({
               </SelectContent>
             </Select>
             {errors.type && (
-              <p className="text-xs text-red-600">{errors.type}</p>
+              <p className="text-xs text-destructive">{errors.type}</p>
             )}
           </div>
 
           {/* ── Notes ── */}
           <div className="space-y-2">
-            <Label htmlFor="notes">Notes (Optional)</Label>
+            <Label htmlFor="notes">Notes (optional)</Label>
             <Input
               id="notes"
               placeholder="Any special notes..."
@@ -519,14 +521,14 @@ export function NewAppointmentModal({
             <Button
               type="submit"
               disabled={submitting || doctorEmpty}
-              className="flex-1 bg-gradient-to-r from-[#2F80ED] to-[#56CCF2] hover:opacity-90"
+              className="flex-1"
             >
               {submitting ? (
-                'Creating...'
+                'Creating…'
               ) : (
                 <>
-                  <Check className="w-4 h-4 mr-2" />
-                  Create Appointment
+                  <Check />
+                  Create appointment
                 </>
               )}
             </Button>

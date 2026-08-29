@@ -14,7 +14,6 @@
 
 import { Bell } from 'lucide-react';
 import { Button } from './button';
-import { Badge } from './badge';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -22,7 +21,6 @@ import {
   DropdownMenuTrigger,
   DropdownMenuSeparator,
 } from './dropdown-menu';
-import { motion } from 'motion/react';
 import { ScrollArea } from './scroll-area';
 import { ReactNode, useEffect, useState } from 'react';
 import { apiGet } from '@/lib/client/fetcher';
@@ -100,16 +98,16 @@ export function TopBar({ title, description, actionButton }: TopBarProps) {
   }, []);
 
   return (
-    <motion.div
-      initial={{ y: -20, opacity: 0 }}
-      animate={{ y: 0, opacity: 1 }}
-      className="sticky top-0 z-30 bg-white border-b border-gray-200 px-6 py-4"
-    >
-      <div className="flex items-center justify-between max-w-7xl mx-auto">
-        <div>
-          <h1 className="text-2xl text-[#333333]">{title}</h1>
+    <div className="sticky top-0 z-30 border-b border-border bg-card/80 px-6 py-4 backdrop-blur-sm">
+      <div className="mx-auto flex max-w-7xl items-center justify-between">
+        <div className="min-w-0">
+          <h1 className="truncate text-xl font-semibold tracking-tight text-foreground">
+            {title}
+          </h1>
           {description && (
-            <p className="text-sm text-gray-500 mt-0.5">{description}</p>
+            <p className="mt-0.5 truncate text-sm text-muted-foreground">
+              {description}
+            </p>
           )}
         </div>
 
@@ -121,21 +119,23 @@ export function TopBar({ title, description, actionButton }: TopBarProps) {
               <Button
                 variant="outline"
                 size="icon"
-                className="relative hover:bg-gray-100 transition-all"
+                className="relative"
                 aria-label="Notifications"
               >
-                <Bell className="w-5 h-5" />
+                <Bell className="size-5" />
                 {unread > 0 && (
-                  <Badge className="absolute -top-1 -right-1 w-5 h-5 flex items-center justify-center p-0 bg-[#EB5757] text-white text-xs">
+                  <span className="absolute -right-1 -top-1 inline-flex size-4 items-center justify-center rounded-full bg-destructive text-[10px] font-semibold text-destructive-foreground ring-2 ring-card">
                     {unread > 9 ? '9+' : unread}
-                  </Badge>
+                  </span>
                 )}
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-80">
-              <div className="px-4 py-3 border-b">
-                <h3 className="font-semibold text-[#333333]">Notifications</h3>
-                <p className="text-xs text-gray-500 mt-1">
+              <div className="border-b border-border px-4 py-3">
+                <h3 className="text-sm font-semibold text-foreground">
+                  Notifications
+                </h3>
+                <p className="mt-1 text-xs text-muted-foreground">
                   {loading
                     ? 'Loading…'
                     : unread > 0
@@ -145,27 +145,27 @@ export function TopBar({ title, description, actionButton }: TopBarProps) {
               </div>
               <ScrollArea className="max-h-[400px]">
                 {items.length === 0 ? (
-                  <div className="px-4 py-6 text-center text-sm text-gray-500">
+                  <div className="px-4 py-6 text-center text-sm text-muted-foreground">
                     No notifications yet. They will appear here as the AI
                     receptionist sends confirmations and reminders.
                   </div>
                 ) : (
                   items.map((notification, index) => (
                     <div key={notification.id}>
-                      <DropdownMenuItem className="flex flex-col items-start p-4 cursor-pointer">
-                        <div className="flex items-start justify-between w-full mb-1">
-                          <p className="font-medium text-sm text-[#333333]">
+                      <DropdownMenuItem className="flex cursor-pointer flex-col items-start p-4">
+                        <div className="mb-1 flex w-full items-start justify-between">
+                          <p className="text-sm font-medium text-foreground">
                             {notification.type} · {notification.patient.fullName}
                           </p>
                           {(notification.status === 'Pending' ||
                             notification.status === 'Failed') && (
-                            <div className="w-2 h-2 bg-[#2F80ED] rounded-full mt-1 ml-2 flex-shrink-0" />
+                            <span className="ml-2 mt-1 size-2 flex-shrink-0 rounded-full bg-primary" />
                           )}
                         </div>
-                        <p className="text-xs text-gray-600 mb-1 line-clamp-2">
+                        <p className="mb-1 line-clamp-2 text-xs text-muted-foreground">
                           {notification.message}
                         </p>
-                        <p className="text-xs text-gray-400">
+                        <p className="text-xs text-muted-foreground/70">
                           {relativeTime(notification.createdAt)}
                         </p>
                       </DropdownMenuItem>
@@ -178,6 +178,6 @@ export function TopBar({ title, description, actionButton }: TopBarProps) {
           </DropdownMenu>
         </div>
       </div>
-    </motion.div>
+    </div>
   );
 }

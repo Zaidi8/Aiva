@@ -276,12 +276,12 @@ export default function DateRangePicker({
             w-8 h-8 rounded text-[12px] font-medium transition-all duration-150
             ${
               isDisabled
-                ? "text-gray-400 cursor-not-allowed"
+                ? "text-muted-foreground/40 cursor-not-allowed"
                 : isSelected
-                  ? "bg-gradient-to-r from-[#2F80ED] to-[#56CCF2] text-white"
+                  ? "bg-primary text-primary-foreground"
                   : isInRange
-                    ? "bg-[#2F80ED]/15 text-[#333333]"
-                    : "text-[#333333] hover:bg-gray-100"
+                    ? "bg-primary-muted text-primary-muted-foreground"
+                    : "text-foreground hover:bg-muted"
             }
           `}
         >
@@ -301,27 +301,25 @@ export default function DateRangePicker({
         onClick={() => !disabled && setIsOpen(!isOpen)}
         disabled={disabled}
         className={`
-          h-[34px] flex items-center justify-between px-3 bg-white border rounded-md text-[12px] font-medium transition-all duration-150
+          h-[34px] flex items-center justify-between px-3 bg-card border rounded-md text-[12px] font-medium transition-all duration-150
           ${
             disabled
-              ? "opacity-50 cursor-not-allowed"
+              ? "opacity-50 cursor-not-allowed border-input"
               : isOpen
-                ? "border-[#2F80ED]"
-                : "border-gray-300 hover:border-gray-400"
+                ? "border-ring"
+                : "border-input hover:border-muted-foreground/50"
           }
+          ${hasSelection ? "text-foreground" : "text-muted-foreground"}
         `}
-        style={{
-          color: hasSelection ? "#333333" : "#9CA3AF",
-          minWidth: "160px",
-        }}
+        style={{ minWidth: "160px" }}
       >
         <span className="flex items-center gap-2 truncate">
-          <Calendar className="w-3.5 h-3.5 text-gray-500 shrink-0" />
+          <Calendar className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
           <span className="truncate">{getDisplayText()}</span>
         </span>
         {hasSelection && (
           <X
-            className="w-3.5 h-3.5 text-gray-500 shrink-0 hover:text-[#333333] ml-1"
+            className="w-3.5 h-3.5 text-muted-foreground shrink-0 hover:text-foreground ml-1"
             onClick={(e) => {
               e.stopPropagation();
               handleClear();
@@ -333,59 +331,58 @@ export default function DateRangePicker({
       {/* Dropdown */}
       {isOpen && (
         <div
-          className="absolute left-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-50 overflow-hidden"
+          className="absolute left-0 mt-1 bg-popover border border-border rounded-lg shadow-md z-50 overflow-hidden"
           style={{
-            boxShadow: "0 4px 16px rgba(47, 128, 237, 0.1)",
             width: "300px",
             left: dropdownPosition === 'right' ? 'auto' : '0',
             right: dropdownPosition === 'right' ? '0' : 'auto',
           }}
         >
           {/* Quick Select Buttons */}
-          <div className="flex gap-1.5 p-3 border-b border-gray-200">
+          <div className="flex gap-1.5 p-3 border-b border-border">
             <button
               onClick={handleToday}
-              className="px-2.5 py-1.5 bg-[#F7F9FB] hover:bg-gray-200 text-[11px] font-medium text-gray-600 hover:text-[#333333] rounded transition-colors"
+              className="px-2.5 py-1.5 bg-muted hover:bg-secondary text-[11px] font-medium text-muted-foreground hover:text-foreground rounded transition-colors"
             >
               Today
             </button>
             <button
               onClick={() => handleQuickSelect(7)}
-              className="px-2.5 py-1.5 bg-[#F7F9FB] hover:bg-gray-200 text-[11px] font-medium text-gray-600 hover:text-[#333333] rounded transition-colors"
+              className="px-2.5 py-1.5 bg-muted hover:bg-secondary text-[11px] font-medium text-muted-foreground hover:text-foreground rounded transition-colors"
             >
               Last 7 days
             </button>
             <button
               onClick={() => handleQuickSelect(30)}
-              className="px-2.5 py-1.5 bg-[#F7F9FB] hover:bg-gray-200 text-[11px] font-medium text-gray-600 hover:text-[#333333] rounded transition-colors"
+              className="px-2.5 py-1.5 bg-muted hover:bg-secondary text-[11px] font-medium text-muted-foreground hover:text-foreground rounded transition-colors"
             >
               Last 30 days
             </button>
             <button
               onClick={() => handleQuickSelect(90)}
-              className="px-2.5 py-1.5 bg-[#F7F9FB] hover:bg-gray-200 text-[11px] font-medium text-gray-600 hover:text-[#333333] rounded transition-colors"
+              className="px-2.5 py-1.5 bg-muted hover:bg-secondary text-[11px] font-medium text-muted-foreground hover:text-foreground rounded transition-colors"
             >
               Last 90 days
             </button>
           </div>
 
           {/* Month Navigation */}
-          <div className="flex items-center justify-between px-3 py-2 border-b border-gray-200">
+          <div className="flex items-center justify-between px-3 py-2 border-b border-border">
             <button
               onClick={() => navigateMonth("prev")}
-              className="p-1 hover:bg-[#F7F9FB] rounded transition-colors"
+              className="p-1 hover:bg-muted rounded transition-colors"
             >
-              <ChevronLeft className="w-4 h-4 text-gray-600" />
+              <ChevronLeft className="w-4 h-4 text-muted-foreground" />
             </button>
-            <span className="text-[13px] font-semibold text-[#333333]">
+            <span className="text-[13px] font-semibold text-foreground">
               {MONTHS[currentMonth.getMonth()]}{" "}
               {currentMonth.getFullYear()}
             </span>
             <button
               onClick={() => navigateMonth("next")}
-              className="p-1 hover:bg-[#F7F9FB] rounded transition-colors"
+              className="p-1 hover:bg-muted rounded transition-colors"
             >
-              <ChevronRight className="w-4 h-4 text-gray-600" />
+              <ChevronRight className="w-4 h-4 text-muted-foreground" />
             </button>
           </div>
 
@@ -396,7 +393,7 @@ export default function DateRangePicker({
               {DAYS.map((day) => (
                 <div
                   key={day}
-                  className="w-8 h-6 flex items-center justify-center text-[10px] font-semibold text-gray-500 uppercase"
+                  className="w-8 h-6 flex items-center justify-center text-[10px] font-semibold text-muted-foreground uppercase"
                 >
                   {day}
                 </div>
@@ -409,8 +406,8 @@ export default function DateRangePicker({
           </div>
 
           {/* Selection Info & Apply Button */}
-          <div className="flex items-center justify-between px-3 py-2.5 border-t border-gray-200 bg-[#F7F9FB]">
-            <div className="text-[11px] text-gray-600">
+          <div className="flex items-center justify-between px-3 py-2.5 border-t border-border bg-muted">
+            <div className="text-[11px] text-muted-foreground">
               {selectingStart
                 ? "Select start date"
                 : "Select end date"}
@@ -418,7 +415,7 @@ export default function DateRangePicker({
             <div className="flex gap-2">
               <button
                 onClick={handleClear}
-                className="px-3 py-1.5 text-[11px] font-medium text-gray-600 hover:text-[#333333] transition-colors"
+                className="px-3 py-1.5 text-[11px] font-medium text-muted-foreground hover:text-foreground transition-colors"
               >
                 Clear
               </button>
@@ -429,8 +426,8 @@ export default function DateRangePicker({
                   px-3 py-1.5 text-[11px] font-semibold rounded transition-all
                   ${
                     tempStart && tempEnd
-                      ? "bg-gradient-to-r from-[#2F80ED] to-[#56CCF2] text-white hover:opacity-90"
-                      : "bg-gray-200 text-gray-400 cursor-not-allowed"
+                      ? "bg-primary text-primary-foreground hover:bg-primary-hover"
+                      : "bg-border text-muted-foreground cursor-not-allowed"
                   }
                 `}
               >

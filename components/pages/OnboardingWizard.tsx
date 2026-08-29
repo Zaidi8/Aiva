@@ -69,12 +69,11 @@ const TIMEZONES = [
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const SLOT_OPTIONS = [15, 20, 30, 45, 60];
 
-// Brand-blue checked state (shadcn default --primary is near-black).
-const CHECKBOX_BRAND = {
-  backgroundColor: '#2F80ED',
-  borderColor: '#2F80ED',
-  color: '#ffffff',
-} as const;
+// Small field-error line, shared across steps.
+function FieldError({ message }: { message?: string }) {
+  if (!message) return null;
+  return <p className="text-xs text-destructive">{message}</p>;
+}
 
 export function OnboardingWizard({
   staffName,
@@ -190,22 +189,22 @@ export function OnboardingWizard({
   const currentStep = STEPS[step];
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-[#F7F9FB] to-[#EAF2FE] flex items-center justify-center p-4">
+    <div className="flex min-h-screen items-center justify-center bg-muted p-4">
       <div className="w-full max-w-2xl">
         {/* Header */}
-        <div className="flex flex-col items-center text-center mb-6">
-          <AivaLogo className="w-12 h-12 mb-3" />
-          <h1 className="text-2xl font-semibold text-[#333333]">
+        <div className="mb-6 flex flex-col items-center text-center">
+          <AivaLogo className="mb-3 size-12" />
+          <h1 className="text-2xl font-semibold tracking-tight text-foreground">
             Welcome to Aiva, {firstName} 👋
           </h1>
-          <p className="text-sm text-gray-500 mt-1">
+          <p className="mt-1.5 text-sm text-muted-foreground">
             Let’s get your clinic ready to take calls — this takes about a
             minute.
           </p>
         </div>
 
         {/* Stepper */}
-        <div className="flex items-center justify-center gap-2 mb-6">
+        <div className="mb-6 flex items-center justify-center gap-2">
           {STEPS.map((s, i) => {
             const done = i < step;
             const active = i === step;
@@ -213,16 +212,18 @@ export function OnboardingWizard({
               <div key={s.key} className="flex items-center gap-2">
                 <div
                   className={cn(
-                    'flex items-center gap-2 rounded-full px-3 py-1.5 text-sm transition-colors',
-                    active && 'bg-[#2F80ED] text-white',
-                    done && 'bg-[#2F80ED]/10 text-[#2F80ED]',
-                    !active && !done && 'bg-white text-gray-400 border',
+                    'flex items-center gap-2 rounded-full px-3 py-1.5 text-sm font-medium transition-colors',
+                    active && 'bg-primary text-primary-foreground',
+                    done && 'bg-primary-muted text-primary',
+                    !active &&
+                      !done &&
+                      'border border-border bg-card text-muted-foreground',
                   )}
                 >
                   {done ? (
-                    <Check className="w-4 h-4" />
+                    <Check className="size-4" />
                   ) : (
-                    <s.icon className="w-4 h-4" />
+                    <s.icon className="size-4" />
                   )}
                   <span className="hidden sm:inline">{s.label}</span>
                 </div>
@@ -230,7 +231,7 @@ export function OnboardingWizard({
                   <div
                     className={cn(
                       'h-px w-5',
-                      i < step ? 'bg-[#2F80ED]' : 'bg-gray-200',
+                      i < step ? 'bg-primary' : 'bg-border',
                     )}
                   />
                 )}
@@ -240,18 +241,18 @@ export function OnboardingWizard({
         </div>
 
         {/* Card */}
-        <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-6 sm:p-8">
-          <div className="flex items-center gap-2 mb-1 text-[#2F80ED]">
-            <currentStep.icon className="w-5 h-5" />
-            <h2 className="text-lg font-medium text-[#333333]">
+        <div className="rounded-2xl border border-border bg-card p-6 shadow-sm sm:p-8">
+          <div className="mb-1 flex items-center gap-2 text-primary">
+            <currentStep.icon className="size-5" />
+            <h2 className="text-lg font-semibold text-foreground">
               {currentStep.label}
             </h2>
           </div>
 
           {/* Step 1 — Clinic details */}
           {step === 0 && (
-            <div className="space-y-4 mt-4">
-              <p className="text-sm text-gray-500">
+            <div className="mt-4 space-y-4">
+              <p className="text-sm text-muted-foreground">
                 These appear on patient confirmations and set the timezone all
                 scheduling runs in.
               </p>
@@ -265,12 +266,10 @@ export function OnboardingWizard({
                   }
                   aria-invalid={!!clinicErrors.name}
                 />
-                {clinicErrors.name && (
-                  <p className="text-xs text-red-600">{clinicErrors.name}</p>
-                )}
+                <FieldError message={clinicErrors.name} />
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div className="space-y-1.5">
                   <Label htmlFor="clinicPhone">Phone</Label>
                   <Input
@@ -282,9 +281,7 @@ export function OnboardingWizard({
                     }
                     aria-invalid={!!clinicErrors.phone}
                   />
-                  {clinicErrors.phone && (
-                    <p className="text-xs text-red-600">{clinicErrors.phone}</p>
-                  )}
+                  <FieldError message={clinicErrors.phone} />
                 </div>
                 <div className="space-y-1.5">
                   <Label htmlFor="clinicEmail">Email</Label>
@@ -298,9 +295,7 @@ export function OnboardingWizard({
                     }
                     aria-invalid={!!clinicErrors.email}
                   />
-                  {clinicErrors.email && (
-                    <p className="text-xs text-red-600">{clinicErrors.email}</p>
-                  )}
+                  <FieldError message={clinicErrors.email} />
                 </div>
               </div>
 
@@ -340,12 +335,12 @@ export function OnboardingWizard({
 
           {/* Step 2 — First doctor */}
           {step === 1 && (
-            <div className="space-y-4 mt-4">
-              <p className="text-sm text-gray-500">
+            <div className="mt-4 space-y-4">
+              <p className="text-sm text-muted-foreground">
                 Add one doctor and their weekly hours so patients (and the AI
                 receptionist) can start booking. You can add more later.
               </p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div className="space-y-1.5">
                   <Label htmlFor="docName">Doctor name</Label>
                   <Input
@@ -355,9 +350,7 @@ export function OnboardingWizard({
                     onChange={(e) => setDocName(e.target.value)}
                     aria-invalid={!!docErrors.name}
                   />
-                  {docErrors.name && (
-                    <p className="text-xs text-red-600">{docErrors.name}</p>
-                  )}
+                  <FieldError message={docErrors.name} />
                 </div>
                 <div className="space-y-1.5">
                   <Label htmlFor="docSpec">Specialization</Label>
@@ -368,11 +361,7 @@ export function OnboardingWizard({
                     onChange={(e) => setDocSpec(e.target.value)}
                     aria-invalid={!!docErrors.specialization}
                   />
-                  {docErrors.specialization && (
-                    <p className="text-xs text-red-600">
-                      {docErrors.specialization}
-                    </p>
-                  )}
+                  <FieldError message={docErrors.specialization} />
                 </div>
               </div>
 
@@ -383,15 +372,13 @@ export function OnboardingWizard({
                     <label
                       key={d}
                       className={cn(
-                        'flex items-center gap-2 rounded-lg border px-3 py-2 cursor-pointer text-sm transition-colors',
+                        'flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm transition-colors',
                         docDays[i]
-                          ? 'border-[#2F80ED] bg-[#2F80ED]/5 text-[#333333]'
-                          : 'border-gray-200 text-gray-500',
+                          ? 'border-primary bg-primary-muted text-foreground'
+                          : 'border-border text-muted-foreground hover:bg-muted',
                       )}
                     >
                       <Checkbox
-                        className="border-gray-300"
-                        style={docDays[i] ? CHECKBOX_BRAND : undefined}
                         checked={docDays[i]}
                         onCheckedChange={(v) =>
                           setDocDays((prev) =>
@@ -403,12 +390,10 @@ export function OnboardingWizard({
                     </label>
                   ))}
                 </div>
-                {docErrors.days && (
-                  <p className="text-xs text-red-600">{docErrors.days}</p>
-                )}
+                <FieldError message={docErrors.days} />
               </div>
 
-              <div className="flex items-end gap-3 flex-wrap">
+              <div className="flex flex-wrap items-end gap-3">
                 <div className="space-y-1.5">
                   <Label htmlFor="start">Start</Label>
                   <Input
@@ -448,29 +433,30 @@ export function OnboardingWizard({
                   </Select>
                 </div>
               </div>
-              {docErrors.time && (
-                <p className="text-xs text-red-600">{docErrors.time}</p>
-              )}
+              <FieldError message={docErrors.time} />
             </div>
           )}
 
           {/* Step 3 — Invite team */}
           {step === 2 && (
-            <div className="space-y-4 mt-4">
-              <p className="text-sm text-gray-500">
+            <div className="mt-4 space-y-4">
+              <p className="text-sm text-muted-foreground">
                 Give colleagues their own dashboard login. This is optional —
                 you can always invite people later from the Team page.
               </p>
 
-              <div className="rounded-xl border border-dashed border-gray-300 p-6 text-center">
-                <UsersRound className="w-10 h-10 text-gray-300 mx-auto mb-3" />
+              <div className="rounded-xl border border-dashed border-border p-6 text-center">
+                <div className="mx-auto mb-3 flex size-12 items-center justify-center rounded-full bg-primary-muted text-primary">
+                  <UsersRound className="size-6" />
+                </div>
                 {invitedCount > 0 ? (
-                  <p className="text-sm text-[#27AE60] font-medium">
+                  <p className="flex items-center justify-center gap-1.5 text-sm font-medium text-success">
+                    <Check className="size-4" />
                     {invitedCount} team member
-                    {invitedCount > 1 ? 's' : ''} invited ✓
+                    {invitedCount > 1 ? 's' : ''} invited
                   </p>
                 ) : (
-                  <p className="text-sm text-gray-500 mb-4">
+                  <p className="mb-4 text-sm text-muted-foreground">
                     No one invited yet.
                   </p>
                 )}
@@ -479,7 +465,7 @@ export function OnboardingWizard({
                   className="mt-3"
                   onClick={() => setInviteOpen(true)}
                 >
-                  <UsersRound className="w-4 h-4 mr-2" />
+                  <UsersRound />
                   Invite a team member
                 </Button>
               </div>
@@ -487,7 +473,7 @@ export function OnboardingWizard({
           )}
 
           {/* Footer actions */}
-          <div className="flex items-center justify-between gap-3 mt-8">
+          <div className="mt-8 flex items-center justify-between gap-3">
             <div>
               {step > 0 && (
                 <Button
@@ -495,7 +481,7 @@ export function OnboardingWizard({
                   onClick={() => setStep((s) => s - 1)}
                   disabled={busy}
                 >
-                  <ArrowLeft className="w-4 h-4 mr-1" />
+                  <ArrowLeft />
                   Back
                 </Button>
               )}
@@ -507,7 +493,7 @@ export function OnboardingWizard({
                   variant="ghost"
                   onClick={() => setStep(2)}
                   disabled={busy}
-                  className="text-gray-500"
+                  className="text-muted-foreground"
                 >
                   Skip for now
                 </Button>
@@ -516,38 +502,27 @@ export function OnboardingWizard({
                 <Button
                   variant="ghost"
                   onClick={goDashboard}
-                  className="text-gray-500"
+                  className="text-muted-foreground"
                 >
                   Skip
                 </Button>
               )}
 
               {step === 0 && (
-                <Button
-                  onClick={saveClinic}
-                  disabled={busy}
-                  className="bg-gradient-to-r from-[#2F80ED] to-[#56CCF2] hover:opacity-90"
-                >
+                <Button onClick={saveClinic} disabled={busy}>
                   {busy ? 'Saving…' : 'Continue'}
-                  <ArrowRight className="w-4 h-4 ml-1" />
+                  <ArrowRight />
                 </Button>
               )}
               {step === 1 && (
-                <Button
-                  onClick={saveDoctor}
-                  disabled={busy}
-                  className="bg-gradient-to-r from-[#2F80ED] to-[#56CCF2] hover:opacity-90"
-                >
+                <Button onClick={saveDoctor} disabled={busy}>
                   {busy ? 'Adding…' : 'Add doctor'}
-                  <ArrowRight className="w-4 h-4 ml-1" />
+                  <ArrowRight />
                 </Button>
               )}
               {step === 2 && (
-                <Button
-                  onClick={goDashboard}
-                  className="bg-gradient-to-r from-[#27AE60] to-[#2F80ED] hover:opacity-90"
-                >
-                  <PartyPopper className="w-4 h-4 mr-2" />
+                <Button onClick={goDashboard}>
+                  <PartyPopper />
                   Go to dashboard
                 </Button>
               )}
@@ -555,7 +530,7 @@ export function OnboardingWizard({
           </div>
         </div>
 
-        <p className="text-center text-xs text-gray-400 mt-4">
+        <p className="mt-4 text-center text-xs text-muted-foreground">
           You can finish any of this later from your dashboard.
         </p>
       </div>

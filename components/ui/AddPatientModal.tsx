@@ -110,48 +110,44 @@ export function AddPatientModal({ isOpen, onClose, onCreated }: AddPatientModalP
     <Dialog open={isOpen} onOpenChange={(open) => (open ? null : onClose())}>
       <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="text-xl">Add New Patient</DialogTitle>
-          <DialogDescription className="text-sm">
-            Create a new patient record
-          </DialogDescription>
+          <DialogTitle>Add new patient</DialogTitle>
+          <DialogDescription>Create a new patient record</DialogDescription>
         </DialogHeader>
-        <form onSubmit={onSubmit} className="space-y-3 mt-3" noValidate>
-          <div className="space-y-1">
-            <Label htmlFor="fullName" className="text-xs">Full Name</Label>
+        <form onSubmit={onSubmit} className="mt-4 space-y-4" noValidate>
+          <div className="space-y-1.5">
+            <Label htmlFor="fullName">Full name</Label>
             <Input
               id="fullName"
               placeholder="John Smith"
-              className="h-10 text-sm"
               aria-invalid={!!form.formState.errors.fullName}
               {...form.register('fullName')}
             />
             {form.formState.errors.fullName && (
-              <p className="text-xs text-red-600">
+              <p className="text-xs text-destructive">
                 {form.formState.errors.fullName.message}
               </p>
             )}
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1">
-              <Label htmlFor="age" className="text-xs">Age</Label>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="age">Age</Label>
               <Input
                 id="age"
                 type="number"
                 placeholder="35"
-                className="h-10 text-sm"
                 aria-invalid={!!form.formState.errors.age}
                 {...form.register('age')}
               />
               {form.formState.errors.age && (
-                <p className="text-xs text-red-600">
+                <p className="text-xs text-destructive">
                   {form.formState.errors.age.message}
                 </p>
               )}
             </div>
 
-            <div className="space-y-1">
-              <Label htmlFor="gender" className="text-xs">Gender</Label>
+            <div className="space-y-1.5">
+              <Label htmlFor="gender">Gender</Label>
               <Select
                 value={form.watch('gender') ?? ''}
                 onValueChange={(val) =>
@@ -162,7 +158,7 @@ export function AddPatientModal({ isOpen, onClose, onCreated }: AddPatientModalP
                   )
                 }
               >
-                <SelectTrigger className="h-10 text-sm">
+                <SelectTrigger>
                   <SelectValue placeholder="Select gender" />
                 </SelectTrigger>
                 <SelectContent>
@@ -172,95 +168,87 @@ export function AddPatientModal({ isOpen, onClose, onCreated }: AddPatientModalP
                 </SelectContent>
               </Select>
               {form.formState.errors.gender && (
-                <p className="text-xs text-red-600">
+                <p className="text-xs text-destructive">
                   {form.formState.errors.gender.message}
                 </p>
               )}
             </div>
           </div>
 
-          <div className="space-y-1">
-            <Label htmlFor="phoneNumber" className="text-xs">Phone Number</Label>
+          <div className="space-y-1.5">
+            <Label htmlFor="phoneNumber">Phone number</Label>
             <Input
               id="phoneNumber"
               placeholder="555-0101"
-              className="h-10 text-sm"
               aria-invalid={!!form.formState.errors.phoneNumber}
               {...form.register('phoneNumber')}
             />
             {form.formState.errors.phoneNumber && (
-              <p className="text-xs text-red-600">
+              <p className="text-xs text-destructive">
                 {form.formState.errors.phoneNumber.message}
               </p>
             )}
           </div>
 
-          <div className="space-y-1">
-            <Label htmlFor="email" className="text-xs">Email (Optional)</Label>
+          <div className="space-y-1.5">
+            <Label htmlFor="email">Email (optional)</Label>
             <Input
               id="email"
               type="email"
               placeholder="patient@example.com"
-              className="h-10 text-sm"
               aria-invalid={!!form.formState.errors.email}
               {...form.register('email')}
             />
             {form.formState.errors.email && (
-              <p className="text-xs text-red-600">
+              <p className="text-xs text-destructive">
                 {form.formState.errors.email.message}
               </p>
             )}
           </div>
 
-          <div className="space-y-1">
-            <Label htmlFor="address" className="text-xs">Address (Optional)</Label>
+          <div className="space-y-1.5">
+            <Label htmlFor="address">Address (optional)</Label>
             <Input
               id="address"
               placeholder="123 Main St"
-              className="h-10 text-sm"
               aria-invalid={!!form.formState.errors.address}
               {...form.register('address')}
             />
             {form.formState.errors.address && (
-              <p className="text-xs text-red-600">
+              <p className="text-xs text-destructive">
                 {form.formState.errors.address.message}
               </p>
             )}
           </div>
 
-          <div className="space-y-1">
-            <Label htmlFor="medical-history" className="text-xs">
-              Medical History (Optional)
-            </Label>
+          <div className="space-y-1.5">
+            <Label htmlFor="medical-history">Medical history (optional)</Label>
             <Input
               id="medical-history"
               placeholder="e.g., Hypertension, Diabetes"
-              className="h-10 text-sm"
               {...form.register('medicalHistoryText')}
             />
-            <p className="text-[10px] text-gray-500">
+            <p className="text-xs text-muted-foreground">
               Separate multiple conditions with commas.
             </p>
           </div>
 
-          <div className="flex gap-2 pt-3">
+          <div className="flex gap-3 pt-2">
             <Button
               type="button"
               variant="outline"
               onClick={onClose}
-              size="sm"
-              className="flex-1 text-xs"
+              className="flex-1"
               disabled={isSubmitting}
             >
               Cancel
             </Button>
             <Button
               type="submit"
-              size="sm"
-              className="flex-1 bg-gradient-to-r from-[#2F80ED] to-[#56CCF2] hover:opacity-90 text-xs"
+              className="flex-1"
               disabled={isSubmitting}
             >
-              {isSubmitting ? 'Adding...' : 'Add Patient'}
+              {isSubmitting ? 'Adding…' : 'Add patient'}
             </Button>
           </div>
         </form>

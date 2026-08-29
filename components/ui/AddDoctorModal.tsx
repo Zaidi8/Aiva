@@ -107,113 +107,97 @@ export function AddDoctorModal({
     <Dialog open={isOpen} onOpenChange={(open) => (open ? null : onClose())}>
       <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="text-xl">
-            {isEdit ? 'Edit Doctor' : 'Add New Doctor'}
-          </DialogTitle>
-          <DialogDescription className="text-sm">
+          <DialogTitle>{isEdit ? 'Edit doctor' : 'Add new doctor'}</DialogTitle>
+          <DialogDescription>
             {isEdit
               ? 'Update this doctor’s profile.'
               : 'Create a doctor, then set their weekly working hours so patients (and the AI receptionist) can book them.'}
           </DialogDescription>
         </DialogHeader>
-        <form onSubmit={onSubmit} className="space-y-3 mt-3" noValidate>
-          <div className="space-y-1">
-            <Label htmlFor="name" className="text-xs">
-              Full Name
-            </Label>
+        <form onSubmit={onSubmit} className="mt-4 space-y-4" noValidate>
+          <div className="space-y-1.5">
+            <Label htmlFor="name">Full name</Label>
             <Input
               id="name"
               placeholder="Dr. Sara Khan"
-              className="h-10 text-sm"
               aria-invalid={!!form.formState.errors.name}
               {...form.register('name')}
             />
             {form.formState.errors.name && (
-              <p className="text-xs text-red-600">
+              <p className="text-xs text-destructive">
                 {form.formState.errors.name.message}
               </p>
             )}
           </div>
 
-          <div className="space-y-1">
-            <Label htmlFor="specialization" className="text-xs">
-              Specialization
-            </Label>
+          <div className="space-y-1.5">
+            <Label htmlFor="specialization">Specialization</Label>
             <Input
               id="specialization"
               placeholder="General Physician"
-              className="h-10 text-sm"
               aria-invalid={!!form.formState.errors.specialization}
               {...form.register('specialization')}
             />
             {form.formState.errors.specialization && (
-              <p className="text-xs text-red-600">
+              <p className="text-xs text-destructive">
                 {form.formState.errors.specialization.message}
               </p>
             )}
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1">
-              <Label htmlFor="email" className="text-xs">
-                Email (Optional)
-              </Label>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="email">Email (optional)</Label>
               <Input
                 id="email"
                 type="email"
                 placeholder="doctor@clinic.com"
-                className="h-10 text-sm"
                 aria-invalid={!!form.formState.errors.email}
                 {...form.register('email')}
               />
               {form.formState.errors.email && (
-                <p className="text-xs text-red-600">
+                <p className="text-xs text-destructive">
                   {form.formState.errors.email.message}
                 </p>
               )}
             </div>
 
-            <div className="space-y-1">
-              <Label htmlFor="phone" className="text-xs">
-                Phone (Optional)
-              </Label>
+            <div className="space-y-1.5">
+              <Label htmlFor="phone">Phone (optional)</Label>
               <Input
                 id="phone"
                 placeholder="555-0101"
-                className="h-10 text-sm"
                 aria-invalid={!!form.formState.errors.phone}
                 {...form.register('phone')}
               />
               {form.formState.errors.phone && (
-                <p className="text-xs text-red-600">
+                <p className="text-xs text-destructive">
                   {form.formState.errors.phone.message}
                 </p>
               )}
             </div>
           </div>
 
-          <div className="flex gap-2 pt-3">
+          <div className="flex gap-3 pt-2">
             <Button
               type="button"
               variant="outline"
               onClick={onClose}
-              size="sm"
-              className="flex-1 text-xs"
+              className="flex-1"
               disabled={isSubmitting}
             >
               Cancel
             </Button>
             <Button
               type="submit"
-              size="sm"
-              className="flex-1 bg-gradient-to-r from-[#2F80ED] to-[#56CCF2] hover:opacity-90 text-xs"
+              className="flex-1"
               disabled={isSubmitting}
             >
               {isSubmitting
-                ? 'Saving...'
+                ? 'Saving…'
                 : isEdit
-                  ? 'Save Changes'
-                  : 'Add Doctor'}
+                  ? 'Save changes'
+                  : 'Add doctor'}
             </Button>
           </div>
         </form>

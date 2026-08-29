@@ -1,484 +1,382 @@
-import { toast } from 'sonner';
-import { Button } from '../ui/button';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../ui/card';
-import { Input } from '../ui/input';
-import { Label } from '../ui/label';
-import { Badge } from '../ui/badge';
-import { Alert, AlertDescription } from '../ui/alert';
-import { StatsBar } from '../ui/StatsBar';
-import { TopBar } from '../ui/TopBar';
-import { CallRecord } from '../ui/CallRecord';
-import { PaginationBar } from '../ui/PaginationBar';
-import { AppointmentToast } from '../ui/AppointmentToast';
-import { 
-  Calendar, 
-  Users, 
-  Bot, 
-  MessageSquare, 
-  CheckCircle, 
-  AlertCircle, 
-  Info,
-  TrendingUp,
-  Clock,
-  XCircle,
-  Plus
-} from 'lucide-react';
-import { AivaLogo } from '../ui/AivaLogo';
-import { motion } from 'motion/react';
+'use client';
+
 import { useState } from 'react';
-import { useNotificationSound } from '../../hooks/useNotificationSound';
+import { toast } from 'sonner';
+import {
+  Bot,
+  Calendar,
+  CheckCircle2,
+  Clock,
+  Info,
+  Mail,
+  Phone,
+  Plus,
+  Search,
+  Sparkles,
+  TriangleAlert,
+  Users,
+  XCircle,
+} from 'lucide-react';
+
+import { PageHeader } from '../ui/page-header';
+import { Button } from '../ui/button';
+import { Badge } from '../ui/badge';
+import { StatusBadge } from '../ui/status-badge';
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '../ui/card';
+import { SectionCard } from '../ui/section-card';
+import { StatCard } from '../ui/stat-card';
+import { EmptyState } from '../ui/empty-state';
+import { FormField } from '../ui/form-field';
+import { Input } from '../ui/input';
+import { Textarea } from '../ui/textarea';
+import { Label } from '../ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '../ui/select';
+import { Switch } from '../ui/switch';
+import { Checkbox } from '../ui/checkbox';
+import { Alert, AlertDescription, AlertTitle } from '../ui/alert';
+import { Spinner } from '../ui/spinner';
+import { Skeleton } from '../ui/skeleton';
 
 interface UIKitPageProps {
   onNavigate?: (page: string) => void;
 }
 
-export function UIKitPage({ onNavigate }: UIKitPageProps) {
-  const [currentPage, setCurrentPage] = useState(1);
-  const { playNotificationSound } = useNotificationSound();
+const swatches = [
+  { name: 'Primary', sub: 'indigo-600', className: 'bg-primary' },
+  { name: 'Primary hover', sub: 'indigo-700', className: 'bg-primary-hover' },
+  { name: 'Teal accent', sub: 'teal-600', className: 'bg-brand-teal' },
+  { name: 'Success', sub: 'emerald-600', className: 'bg-success' },
+  { name: 'Warning', sub: 'amber-600', className: 'bg-warning' },
+  { name: 'Destructive', sub: 'red-600', className: 'bg-destructive' },
+  { name: 'Info', sub: 'sky-600', className: 'bg-info' },
+  { name: 'Sidebar', sub: 'indigo-950', className: 'bg-sidebar' },
+];
 
-  const sampleTranscript = [
-    { id: '1', speaker: 'ai' as const, text: 'Hello! How can I help you today?', timestamp: '00:00', duration: '0:03' },
-    { id: '2', speaker: 'patient' as const, text: 'I need to book an appointment', timestamp: '00:10', duration: '0:02' },
-    { id: '3', speaker: 'ai' as const, text: 'I\'d be happy to help you schedule an appointment.', timestamp: '00:15', duration: '0:04' },
-  ];
-
-  const statsBarData = [
-    { label: 'Appointments', value: 24, icon: Calendar, color: '#2F80ED', change: '+3' },
-    { label: 'Pending', value: 7, icon: Clock, color: '#F2994A' },
-    { label: 'Cancellations', value: 3, icon: XCircle, color: '#EB5757' },
-    { label: 'Satisfaction', value: '4.6', icon: CheckCircle, color: '#27AE60' },
-  ];
-
-  const handleToastDemo = () => {
-    playNotificationSound();
-    toast.custom((t) => (
-      <AppointmentToast
-        patientName="Sarah Johnson"
-        time="2:30 PM Today"
-        doctor="Dr. Martinez"
-      />
-    ), {
-      duration: 4000,
-    });
-  };
+export function UIKitPage(_props: UIKitPageProps) {
+  const [notify, setNotify] = useState(true);
+  const [agree, setAgree] = useState(false);
 
   return (
-    <div className="min-h-screen bg-[#F7F9FB]">
-      <TopBar 
-        title="UI Kit" 
-        description="Design system components and style guide for Aiva"
-        notificationCount={5}
-      />
+    <div className="min-h-screen bg-background">
+      <div className="mx-auto max-w-6xl space-y-10 p-8">
+        <PageHeader
+          icon={<Sparkles />}
+          title="Design System"
+          description="Aiva component library — clinical indigo on slate, comfortable density."
+          actions={
+            <Button>
+              <Plus />
+              New component
+            </Button>
+          }
+        />
 
-      <div className="p-8 max-w-7xl mx-auto space-y-12">
-        {/* Brand Identity */}
-        <section>
-          <motion.h2 
-            initial={{ y: -10, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            className="text-2xl text-[#333333] mb-6"
-          >
-            Brand Identity
-          </motion.h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <motion.div
-              initial={{ y: 20, opacity: 0 }}
-              animate={{ y: 0, opacity: 1 }}
-              transition={{ delay: 0.1 }}
-            >
-              <Card className="hover:shadow-lg transition-shadow">
-                <CardHeader>
-                  <CardTitle>Logo</CardTitle>
-                  <CardDescription>Aiva - AI Virtual Assistant</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="flex items-center gap-6 p-6 bg-[#F7F9FB] rounded-lg">
-                    <motion.div
-                      animate={{ rotate: 360 }}
-                      transition={{ duration: 10, repeat: Infinity, ease: 'linear' }}
-                    >
-                      <AivaLogo className="w-20 h-20" />
-                    </motion.div>
-                    <div>
-                      <p className="text-2xl text-[#333333] mb-1">Aiva</p>
-                      <p className="text-sm text-gray-500">AI Virtual Assistant</p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </motion.div>
-
-            <motion.div
-              initial={{ y: 20, opacity: 0 }}
-              animate={{ y: 0, opacity: 1 }}
-              transition={{ delay: 0.2 }}
-            >
-              <Card className="hover:shadow-lg transition-shadow">
-                <CardHeader>
-                  <CardTitle>Color Palette</CardTitle>
-                  <CardDescription>Primary brand colors</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="grid grid-cols-2 gap-4">
-                    {[
-                      { name: 'Primary Blue', color: '#2F80ED' },
-                      { name: 'Light Blue', color: '#56CCF2' },
-                      { name: 'Success Green', color: '#27AE60' },
-                      { name: 'Warning Orange', color: '#F2994A' },
-                      { name: 'Error Red', color: '#EB5757' },
-                      { name: 'Background', color: '#F7F9FB' },
-                    ].map((item, index) => (
-                      <motion.div 
-                        key={item.name} 
-                        className="space-y-2"
-                        whileHover={{ scale: 1.05 }}
-                        initial={{ opacity: 0, scale: 0.8 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        transition={{ delay: 0.3 + index * 0.05 }}
-                      >
-                        <div
-                          className="h-16 rounded-lg border border-gray-200 shadow-sm"
-                          style={{ backgroundColor: item.color }}
-                        />
-                        <div className="text-sm">
-                          <p className="text-gray-900">{item.name}</p>
-                          <p className="text-gray-500 text-xs">{item.color}</p>
-                        </div>
-                      </motion.div>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
-            </motion.div>
+        {/* Color tokens */}
+        <SectionCard
+          title="Color tokens"
+          description="Semantic colors drive every component — no hardcoded hex."
+        >
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+            {swatches.map((s) => (
+              <div key={s.name} className="space-y-2">
+                <div
+                  className={`h-16 rounded-lg border border-border/60 shadow-xs ${s.className}`}
+                />
+                <div>
+                  <p className="text-sm font-medium text-foreground">{s.name}</p>
+                  <p className="text-xs text-muted-foreground">{s.sub}</p>
+                </div>
+              </div>
+            ))}
           </div>
-        </section>
+        </SectionCard>
 
-        {/* Custom Components */}
-        <section>
-          <motion.h2 
-            initial={{ y: -10, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            className="text-2xl text-[#333333] mb-6"
-          >
-            Custom Components
-          </motion.h2>
-          <div className="space-y-6">
-            {/* Stats Bar */}
-            <motion.div
-              initial={{ y: 20, opacity: 0 }}
-              animate={{ y: 0, opacity: 1 }}
-              transition={{ delay: 0.1 }}
-            >
-              <Card className="hover:shadow-lg transition-shadow">
-                <CardHeader>
-                  <CardTitle>Stats Bar</CardTitle>
-                  <CardDescription>Minimalistic statistics display with hover effects</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <StatsBar stats={statsBarData} />
-                </CardContent>
-              </Card>
-            </motion.div>
+        {/* Typography */}
+        <SectionCard title="Typography" description="Geist Sans · tracked headings">
+          <div className="space-y-3">
+            <h1>Heading 1 — Appointments overview</h1>
+            <h2>Heading 2 — Today&apos;s schedule</h2>
+            <h3>Heading 3 — Section title</h3>
+            <p className="text-foreground">
+              Body text at 14px with comfortable 1.6 line height for dense
+              clinical dashboards that still breathe.
+            </p>
+            <p className="text-sm text-muted-foreground">
+              Muted secondary text — timestamps, hints, and metadata.
+            </p>
+          </div>
+        </SectionCard>
 
-            {/* Call Transcript */}
-            <motion.div
-              initial={{ y: 20, opacity: 0 }}
-              animate={{ y: 0, opacity: 1 }}
-              transition={{ delay: 0.2 }}
-            >
-              <Card className="hover:shadow-lg transition-shadow">
-                <CardHeader>
-                  <CardTitle>Call Record</CardTitle>
-                  <CardDescription>AI voice call transcript with call quality and sentiment analysis</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <CallRecord
-                    transcript={sampleTranscript}
-                    patientName="John Smith"
-                    duration="2:15"
-                    callQuality={5}
-                    sentiment="positive"
-                  />
-                </CardContent>
-              </Card>
-            </motion.div>
-
-            {/* Pagination */}
-            <motion.div
-              initial={{ y: 20, opacity: 0 }}
-              animate={{ y: 0, opacity: 1 }}
-              transition={{ delay: 0.3 }}
-            >
-              <Card className="hover:shadow-lg transition-shadow">
-                <CardHeader>
-                  <CardTitle>Pagination Bar</CardTitle>
-                  <CardDescription>Full-featured pagination with page controls</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <PaginationBar
-                    currentPage={currentPage}
-                    totalPages={10}
-                    onPageChange={setCurrentPage}
-                    itemsPerPage={10}
-                    totalItems={95}
-                  />
-                </CardContent>
-              </Card>
-            </motion.div>
-
-            {/* Toast Notifications */}
-            <motion.div
-              initial={{ y: 20, opacity: 0 }}
-              animate={{ y: 0, opacity: 1 }}
-              transition={{ delay: 0.4 }}
-            >
-              <Card className="hover:shadow-lg transition-shadow">
-                <CardHeader>
-                  <CardTitle>Toast Notifications</CardTitle>
-                  <CardDescription>Real-time notifications with sound alerts</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  <div className="flex flex-wrap gap-3">
-                    <Button onClick={handleToastDemo}>
-                      <MessageSquare className="w-4 h-4 mr-2" />
-                      Appointment Toast
-                    </Button>
-                    <Button 
-                      variant="outline"
-                      onClick={() => toast.success('Action completed successfully!')}
-                    >
-                      Success Toast
-                    </Button>
-                    <Button 
-                      variant="outline"
-                      onClick={() => toast.error('An error occurred')}
-                    >
-                      Error Toast
-                    </Button>
-                    <Button 
-                      variant="outline"
-                      onClick={() => toast.info('This is an informational message')}
-                    >
-                      Info Toast
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            </motion.div>
+        {/* Stat cards */}
+        <section className="space-y-4">
+          <h2>Metrics</h2>
+          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
+            <StatCard
+              label="Appointments today"
+              value="24"
+              icon={<Calendar />}
+              accent="primary"
+              trend={{ value: '12%', direction: 'up' }}
+              hint="vs last week"
+            />
+            <StatCard
+              label="Active patients"
+              value="1,284"
+              icon={<Users />}
+              accent="teal"
+              trend={{ value: '3%', direction: 'up' }}
+              hint="vs last week"
+            />
+            <StatCard
+              label="AI calls handled"
+              value="47"
+              icon={<Bot />}
+              accent="info"
+              trend={{ value: '0%', direction: 'neutral' }}
+              hint="steady"
+            />
+            <StatCard
+              label="No-shows"
+              value="3"
+              icon={<XCircle />}
+              accent="warning"
+              trend={{ value: '8%', direction: 'down' }}
+              hint="vs last week"
+            />
           </div>
         </section>
 
         {/* Buttons */}
-        <section>
-          <motion.h2 
-            initial={{ y: -10, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            className="text-2xl text-[#333333] mb-6"
-          >
-            Buttons
-          </motion.h2>
-          <Card className="hover:shadow-lg transition-shadow">
-            <CardContent className="p-6">
-              <div className="space-y-6">
-                <div>
-                  <Label className="mb-3 block">Primary Buttons</Label>
-                  <div className="flex flex-wrap gap-3">
-                    <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
-                      <Button className="bg-[#2F80ED] hover:bg-[#2F80ED]/90">Primary</Button>
-                    </motion.div>
-                    <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
-                      <Button className="bg-gradient-to-r from-[#2F80ED] to-[#56CCF2]">Gradient</Button>
-                    </motion.div>
-                    <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
-                      <Button className="bg-[#27AE60] hover:bg-[#27AE60]/90">Success</Button>
-                    </motion.div>
-                    <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
-                      <Button variant="destructive">Destructive</Button>
-                    </motion.div>
-                  </div>
-                </div>
-                <div>
-                  <Label className="mb-3 block">Secondary Buttons</Label>
-                  <div className="flex flex-wrap gap-3">
-                    <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
-                      <Button variant="outline">Outline</Button>
-                    </motion.div>
-                    <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
-                      <Button variant="secondary">Secondary</Button>
-                    </motion.div>
-                    <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
-                      <Button variant="ghost">Ghost</Button>
-                    </motion.div>
-                    <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
-                      <Button variant="link">Link</Button>
-                    </motion.div>
-                  </div>
-                </div>
-                <div>
-                  <Label className="mb-3 block">Icon Buttons</Label>
-                  <div className="flex flex-wrap gap-3">
-                    <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
-                      <Button>
-                        <Plus className="w-4 h-4 mr-2" />
-                        With Icon
-                      </Button>
-                    </motion.div>
-                    <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
-                      <Button variant="outline" size="icon">
-                        <MessageSquare className="w-4 h-4" />
-                      </Button>
-                    </motion.div>
-                  </div>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </section>
+        <SectionCard title="Buttons" description="Solid indigo primary · subtle elevation">
+          <div className="space-y-6">
+            <div className="flex flex-wrap items-center gap-3">
+              <Button>Primary</Button>
+              <Button variant="secondary">Secondary</Button>
+              <Button variant="outline">Outline</Button>
+              <Button variant="ghost">Ghost</Button>
+              <Button variant="destructive">Destructive</Button>
+              <Button variant="link">Link</Button>
+            </div>
+            <div className="flex flex-wrap items-center gap-3">
+              <Button size="sm">Small</Button>
+              <Button size="default">Default</Button>
+              <Button size="lg">Large</Button>
+              <Button size="icon" aria-label="Add">
+                <Plus />
+              </Button>
+              <Button>
+                <Phone />
+                With icon
+              </Button>
+              <Button disabled>Disabled</Button>
+              <Button disabled>
+                <Spinner size="sm" className="text-primary-foreground" />
+                Saving
+              </Button>
+            </div>
+          </div>
+        </SectionCard>
 
-        {/* Badges */}
-        <section>
-          <motion.h2 
-            initial={{ y: -10, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            className="text-2xl text-[#333333] mb-6"
-          >
-            Badges
-          </motion.h2>
-          <Card className="hover:shadow-lg transition-shadow">
-            <CardContent className="p-6">
-              <div className="space-y-4">
-                <div>
-                  <Label className="mb-3 block">Status Badges</Label>
-                  <div className="flex flex-wrap gap-3">
-                    <Badge className="bg-[#27AE60]/10 text-[#27AE60] hover:bg-[#27AE60]/20">Confirmed</Badge>
-                    <Badge className="bg-[#F2994A]/10 text-[#F2994A] hover:bg-[#F2994A]/20">Pending</Badge>
-                    <Badge className="bg-[#2F80ED]/10 text-[#2F80ED] hover:bg-[#2F80ED]/20">Completed</Badge>
-                    <Badge className="bg-[#EB5757]/10 text-[#EB5757] hover:bg-[#EB5757]/20">Cancelled</Badge>
-                  </div>
-                </div>
-                <div>
-                  <Label className="mb-3 block">Outline Badges</Label>
-                  <div className="flex flex-wrap gap-3">
-                    <Badge variant="outline">Default</Badge>
-                    <Badge variant="outline">Secondary</Badge>
-                    <Badge variant="outline">Info</Badge>
-                  </div>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </section>
+        {/* Badges + status */}
+        <SectionCard title="Badges & status" description="Soft, tinted status pills">
+          <div className="space-y-5">
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge>Default</Badge>
+              <Badge variant="secondary">Secondary</Badge>
+              <Badge variant="brand">Brand</Badge>
+              <Badge variant="success">Success</Badge>
+              <Badge variant="warning">Warning</Badge>
+              <Badge variant="info">Info</Badge>
+              <Badge variant="destructive">Destructive</Badge>
+              <Badge variant="outline">Outline</Badge>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <StatusBadge status="Confirmed" />
+              <StatusBadge status="Pending" />
+              <StatusBadge status="Completed" />
+              <StatusBadge status="Cancelled" />
+              <StatusBadge status="no-show" />
+              <StatusBadge status="Positive" />
+              <StatusBadge status="Transferred" />
+            </div>
+          </div>
+        </SectionCard>
 
         {/* Forms */}
-        <section>
-          <motion.h2 
-            initial={{ y: -10, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            className="text-2xl text-[#333333] mb-6"
-          >
-            Form Elements
-          </motion.h2>
-          <Card className="hover:shadow-lg transition-shadow">
+        <SectionCard title="Form controls" description="h-10 comfortable density">
+          <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+            <FormField label="Full name" htmlFor="uk-name" required>
+              <Input id="uk-name" placeholder="Jane Cooper" />
+            </FormField>
+            <FormField
+              label="Email"
+              htmlFor="uk-email"
+              hint="We'll send confirmations here."
+            >
+              <div className="relative">
+                <Mail className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                <Input id="uk-email" className="pl-9" placeholder="jane@clinic.com" />
+              </div>
+            </FormField>
+            <FormField
+              label="Phone"
+              htmlFor="uk-phone"
+              error="Enter a valid phone number."
+            >
+              <Input id="uk-phone" aria-invalid defaultValue="12345" />
+            </FormField>
+            <FormField label="Department" htmlFor="uk-dept">
+              <Select>
+                <SelectTrigger id="uk-dept">
+                  <SelectValue placeholder="Select a department" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="general">General Practice</SelectItem>
+                  <SelectItem value="dental">Dental</SelectItem>
+                  <SelectItem value="cardiology">Cardiology</SelectItem>
+                </SelectContent>
+              </Select>
+            </FormField>
+            <FormField label="Notes" htmlFor="uk-notes" className="md:col-span-2">
+              <Textarea id="uk-notes" placeholder="Add any relevant details…" />
+            </FormField>
+            <div className="flex items-center gap-3">
+              <Switch id="uk-notify" checked={notify} onCheckedChange={setNotify} />
+              <Label htmlFor="uk-notify">Email notifications</Label>
+            </div>
+            <div className="flex items-center gap-3">
+              <Checkbox
+                id="uk-agree"
+                checked={agree}
+                onCheckedChange={(v) => setAgree(v === true)}
+              />
+              <Label htmlFor="uk-agree">I agree to the terms</Label>
+            </div>
+          </div>
+        </SectionCard>
+
+        {/* Alerts */}
+        <SectionCard title="Alerts" description="Semantic, soft-tinted">
+          <div className="space-y-3">
+            <Alert variant="info">
+              <Info />
+              <AlertTitle>Heads up</AlertTitle>
+              <AlertDescription>
+                Your clinic hours were updated for the holiday weekend.
+              </AlertDescription>
+            </Alert>
+            <Alert variant="success">
+              <CheckCircle2 />
+              <AlertTitle>Appointment confirmed</AlertTitle>
+              <AlertDescription>
+                Sarah Johnson is booked for 2:30 PM today with Dr. Martinez.
+              </AlertDescription>
+            </Alert>
+            <Alert variant="warning">
+              <TriangleAlert />
+              <AlertTitle>Approaching capacity</AlertTitle>
+              <AlertDescription>
+                Only 2 slots remain for tomorrow morning.
+              </AlertDescription>
+            </Alert>
+            <Alert variant="destructive">
+              <XCircle />
+              <AlertTitle>Sync failed</AlertTitle>
+              <AlertDescription>
+                We couldn&apos;t reach the calendar service. Retrying shortly.
+              </AlertDescription>
+            </Alert>
+          </div>
+        </SectionCard>
+
+        {/* Loading states */}
+        <SectionCard
+          title="Loading states"
+          description="Spinners and shimmer skeletons"
+        >
+          <div className="grid grid-cols-1 gap-8 md:grid-cols-2">
+            <div className="flex items-center gap-6">
+              <Spinner size="sm" />
+              <Spinner size="default" />
+              <Spinner size="lg" />
+              <Spinner label="Loading appointments…" />
+            </div>
+            <div className="space-y-3">
+              <div className="flex items-center gap-3">
+                <Skeleton className="size-10 rounded-full" />
+                <div className="flex-1 space-y-2">
+                  <Skeleton className="h-3.5 w-1/2" />
+                  <Skeleton className="h-3 w-1/3" />
+                </div>
+              </div>
+              <Skeleton className="h-3 w-full" />
+              <Skeleton className="h-3 w-4/5" />
+            </div>
+          </div>
+        </SectionCard>
+
+        {/* Empty state + branded card */}
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+          <Card>
+            <CardHeader>
+              <CardTitle>Empty state</CardTitle>
+              <CardDescription>Shown when a list has no items.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <EmptyState
+                icon={<Calendar />}
+                title="No appointments yet"
+                description="When patients book, their appointments will appear here."
+                action={
+                  <Button>
+                    <Plus />
+                    Add appointment
+                  </Button>
+                }
+              />
+            </CardContent>
+          </Card>
+
+          {/* The single branded gradient surface — the AI card */}
+          <Card className="overflow-hidden border-0 bg-gradient-to-br from-primary to-brand-teal text-primary-foreground shadow-lg">
             <CardContent className="p-6">
-              <div className="space-y-6 max-w-md">
-                <div className="space-y-2">
-                  <Label htmlFor="demo-input">Input Field</Label>
-                  <Input id="demo-input" placeholder="Enter text..." />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="demo-input-icon">Input with Icon</Label>
-                  <div className="relative">
-                    <Users className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
-                    <Input id="demo-input-icon" placeholder="Search..." className="pl-10" />
-                  </div>
-                </div>
+              <div className="flex size-11 items-center justify-center rounded-xl bg-white/15 backdrop-blur-sm">
+                <Bot className="size-5" />
+              </div>
+              <p className="mt-5 text-lg font-semibold">AI Receptionist</p>
+              <p className="mt-1 max-w-sm text-sm text-primary-foreground/80">
+                Handling calls 24/7 — booking, rescheduling, and answering
+                patient questions in natural conversation.
+              </p>
+              <div className="mt-5 flex items-center gap-2">
+                <Button
+                  variant="secondary"
+                  className="bg-white/15 text-primary-foreground hover:bg-white/25"
+                  onClick={() => toast.success('Demo call started')}
+                >
+                  <Phone />
+                  Start demo call
+                </Button>
+                <span className="inline-flex items-center gap-1.5 text-sm text-primary-foreground/80">
+                  <Clock className="size-4" />
+                  avg 42s
+                </span>
               </div>
             </CardContent>
           </Card>
-        </section>
-
-        {/* Alerts */}
-        <section>
-          <motion.h2 
-            initial={{ y: -10, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            className="text-2xl text-[#333333] mb-6"
-          >
-            Alerts
-          </motion.h2>
-          <div className="space-y-4">
-            <motion.div
-              initial={{ x: -20, opacity: 0 }}
-              animate={{ x: 0, opacity: 1 }}
-              transition={{ delay: 0.1 }}
-            >
-              <Alert className="bg-[#2F80ED]/10 border-[#2F80ED]">
-                <Info className="w-4 h-4 text-[#2F80ED]" />
-                <AlertDescription className="text-[#2F80ED]">
-                  This is an informational alert message.
-                </AlertDescription>
-              </Alert>
-            </motion.div>
-            <motion.div
-              initial={{ x: -20, opacity: 0 }}
-              animate={{ x: 0, opacity: 1 }}
-              transition={{ delay: 0.2 }}
-            >
-              <Alert className="bg-[#27AE60]/10 border-[#27AE60]">
-                <CheckCircle className="w-4 h-4 text-[#27AE60]" />
-                <AlertDescription className="text-[#27AE60]">
-                  This is a success alert message.
-                </AlertDescription>
-              </Alert>
-            </motion.div>
-            <motion.div
-              initial={{ x: -20, opacity: 0 }}
-              animate={{ x: 0, opacity: 1 }}
-              transition={{ delay: 0.3 }}
-            >
-              <Alert className="bg-[#EB5757]/10 border-[#EB5757]">
-                <AlertCircle className="w-4 h-4 text-[#EB5757]" />
-                <AlertDescription className="text-[#EB5757]">
-                  This is an error alert message.
-                </AlertDescription>
-              </Alert>
-            </motion.div>
-          </div>
-        </section>
-
-        {/* Cards */}
-        <section>
-          <motion.h2 
-            initial={{ y: -10, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            className="text-2xl text-[#333333] mb-6"
-          >
-            Cards
-          </motion.h2>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {[
-              { icon: Calendar, label: 'Appointments', value: '24', gradient: 'from-[#2F80ED] to-[#56CCF2]' },
-              { icon: Users, label: 'Patients', value: '156', gradient: 'from-[#56CCF2] to-[#27AE60]' },
-              { icon: Bot, label: 'AI Calls', value: '47', gradient: 'from-[#27AE60] to-[#2F80ED]' },
-            ].map((item, index) => (
-              <motion.div
-                key={item.label}
-                initial={{ y: 20, opacity: 0 }}
-                animate={{ y: 0, opacity: 1 }}
-                transition={{ delay: index * 0.1 }}
-                whileHover={{ scale: 1.05, y: -5 }}
-              >
-                <Card className={`bg-gradient-to-br ${item.gradient} text-white border-none shadow-lg`}>
-                  <CardContent className="p-6">
-                    <item.icon className="w-8 h-8 mb-4" />
-                    <p className="text-3xl mb-2">{item.value}</p>
-                    <p className="text-sm opacity-90">{item.label}</p>
-                  </CardContent>
-                </Card>
-              </motion.div>
-            ))}
-          </div>
-        </section>
+        </div>
       </div>
     </div>
   );

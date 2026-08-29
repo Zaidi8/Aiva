@@ -6,7 +6,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 
 export default function Loading() {
   return (
-    <div className="min-h-screen bg-[#F7F9FB]">
+    <div className="min-h-screen bg-background">
       <PageHeaderSkeleton />
       <div className="p-8 max-w-7xl mx-auto space-y-8">
         <Skeleton className="h-12 w-full rounded-md" />

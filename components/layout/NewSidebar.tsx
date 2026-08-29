@@ -1,3 +1,5 @@
+'use client';
+
 import { useState } from "react";
 import {
   LayoutDashboard,
@@ -19,23 +21,20 @@ import {
 import Link from "next/link";
 import type { PageType } from "@/types";
 import { AivaLogo } from "../ui/AivaLogo";
-
-// Every nav item maps 1:1 to a top-level route.
-const hrefFor = (id: PageType) => `/${id}`;
-import { motion, AnimatePresence } from "motion/react";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "../ui/dropdown-menu";
-import {
-  Avatar,
-  AvatarFallback,
-  AvatarImage,
-} from "../ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "../ui/avatar";
+import { cn } from "../ui/utils";
 import { signout } from "@/app/(auth)/actions";
+
+// Every nav item maps 1:1 to a top-level route.
+const hrefFor = (id: PageType) => `/${id}`;
 
 export interface SidebarUserProfile {
   name: string;
@@ -54,149 +53,122 @@ interface SidebarProps {
 const isDev = process.env.NODE_ENV !== "production";
 
 const mainMenuItems = [
-  {
-    id: "dashboard" as PageType,
-    label: "Dashboard",
-    icon: LayoutDashboard,
-  },
-  {
-    id: "appointments" as PageType,
-    label: "Appointments",
-    icon: Calendar,
-  },
-  {
-    id: "patients" as PageType,
-    label: "Patient Records",
-    icon: Users,
-  },
-  {
-    id: "doctors" as PageType,
-    label: "Doctors",
-    icon: Stethoscope,
-  },
-  {
-    id: "team" as PageType,
-    label: "Team",
-    icon: UsersRound,
-  },
-  {
-    id: "ai-receptionist" as PageType,
-    label: "AI Receptionist",
-    icon: Phone,
-  },
-  {
-    id: "analytics" as PageType,
-    label: "Analytics",
-    icon: BarChart3,
-  },
-  // UI Kit is a developer-facing component showcase; hide it from real users
-  // in production builds. The route itself stays — visit /ui-kit directly to
-  // reach it when needed.
+  { id: "dashboard" as PageType, label: "Dashboard", icon: LayoutDashboard },
+  { id: "appointments" as PageType, label: "Appointments", icon: Calendar },
+  { id: "patients" as PageType, label: "Patient Records", icon: Users },
+  { id: "doctors" as PageType, label: "Doctors", icon: Stethoscope },
+  { id: "team" as PageType, label: "Team", icon: UsersRound },
+  { id: "ai-receptionist" as PageType, label: "AI Receptionist", icon: Phone },
+  { id: "analytics" as PageType, label: "Analytics", icon: BarChart3 },
+  // UI Kit is a developer-facing showcase; hidden from real users in production
+  // builds. The route stays — visit /ui-kit directly to reach it.
   ...(isDev
     ? [{ id: "ui-kit" as PageType, label: "UI Kit", icon: Palette }]
     : []),
 ];
 
-const bottomMenuItems = [
-  {
-    id: "settings" as PageType,
-    label: "Settings",
-    icon: Settings,
-  },
-];
+function initials(name: string) {
+  return name
+    .split(" ")
+    .map((n) => n[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+}
 
-export function NewSidebar({
-  currentPage,
-  userProfile,
-}: SidebarProps) {
-  const [isMobileMenuOpen, setIsMobileMenuOpen] =
-    useState(false);
+export function NewSidebar({ currentPage, userProfile }: SidebarProps) {
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(false);
+
+  const navLinkClass = (isActive: boolean) =>
+    cn(
+      "group relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
+      isActive
+        ? "bg-sidebar-primary text-sidebar-primary-foreground shadow-sm"
+        : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+      isCollapsed && "justify-center px-0",
+    );
 
   return (
     <>
-      {/* Mobile Menu Button */}
+      {/* Mobile menu button */}
       <button
-        onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-        className="lg:hidden fixed top-4 left-4 z-50 p-2 bg-white rounded-lg shadow-lg hover:shadow-xl transition-shadow"
+        onClick={() => setIsMobileMenuOpen((v) => !v)}
+        aria-label={isMobileMenuOpen ? "Close menu" : "Open menu"}
+        className="fixed left-4 top-4 z-50 inline-flex size-10 items-center justify-center rounded-lg bg-sidebar text-sidebar-foreground shadow-lg transition-colors hover:text-white lg:hidden"
       >
         {isMobileMenuOpen ? (
-          <X className="w-6 h-6 text-[#333333]" />
+          <X className="size-5" />
         ) : (
-          <Menu className="w-6 h-6 text-[#333333]" />
+          <Menu className="size-5" />
         )}
       </button>
 
-      {/* Overlay for mobile */}
+      {/* Mobile overlay */}
       {isMobileMenuOpen && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          className="lg:hidden fixed inset-0 bg-black/50 z-30"
+        <div
+          className="fixed inset-0 z-30 bg-slate-950/50 backdrop-blur-sm lg:hidden"
           onClick={() => setIsMobileMenuOpen(false)}
+          aria-hidden
         />
       )}
 
-      {/* Collapse/Expand Toggle - Desktop Only */}
-      <motion.button
-        whileHover={{ scale: 1.1 }}
-        whileTap={{ scale: 0.95 }}
-        onClick={() => setIsCollapsed(!isCollapsed)}
-        className={`hidden lg:flex items-center justify-center fixed z-50 w-10 h-10 bg-white border border-gray-200 rounded-full shadow-lg hover:shadow-xl transition-all ${
-          isCollapsed ? "left-[68px]" : "left-[248px]"
-        }`}
-        style={{ top: "calc(100vh - 180px)" }}
-      >
-        {isCollapsed ? (
-          <ChevronRight className="w-5 h-5 text-gray-600" />
-        ) : (
-          <ChevronLeft className="w-5 h-5 text-gray-600" />
+      {/* Sidebar rail */}
+      <aside
+        className={cn(
+          "flex flex-col bg-sidebar text-sidebar-foreground border-r border-sidebar-border",
+          "fixed inset-y-0 left-0 z-40 lg:static",
+          "transition-[width,transform] duration-200 ease-out",
+          isCollapsed ? "w-[76px]" : "w-64",
+          isMobileMenuOpen
+            ? "translate-x-0"
+            : "-translate-x-full lg:translate-x-0",
         )}
-      </motion.button>
-
-      {/* Sidebar */}
-      <motion.aside
-        animate={{ width: isCollapsed ? 76 : 256 }}
-        className={`
-          bg-white border-r border-gray-200 flex flex-col
-          fixed lg:static inset-y-0 left-0 z-40
-          transform transition-transform duration-200 ease-in-out
-          ${isMobileMenuOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}
-        `}
       >
-        {/* Logo Section */}
+        {/* Header: logo + collapse toggle */}
         <div
-          className={`p-6 border-b border-gray-200 ${isCollapsed ? "px-3" : ""}`}
+          className={cn(
+            "flex h-16 items-center gap-3 border-b border-sidebar-border px-4",
+            isCollapsed && "justify-center px-0",
+          )}
         >
-          <motion.div
-            className="flex items-center gap-3"
-            animate={{
-              justifyContent: isCollapsed
-                ? "center"
-                : "flex-start",
-            }}
+          <AivaLogo className="size-9 shrink-0" />
+          {!isCollapsed && (
+            <span className="text-lg font-semibold tracking-tight text-white">
+              Aiva
+            </span>
+          )}
+          <button
+            onClick={() => setIsCollapsed((v) => !v)}
+            aria-label={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+            className={cn(
+              "ml-auto hidden size-8 items-center justify-center rounded-md text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent hover:text-white lg:inline-flex",
+              isCollapsed && "hidden",
+            )}
           >
-            <AivaLogo className="w-10 h-10 flex-shrink-0" />
-            <AnimatePresence>
-              {!isCollapsed && (
-                <motion.div
-                  initial={{ opacity: 0, width: 0 }}
-                  animate={{ opacity: 1, width: "auto" }}
-                  exit={{ opacity: 0, width: 0 }}
-                >
-                  <h1 className="text-[#333333] text-lg whitespace-nowrap">
-                    Aiva
-                  </h1>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </motion.div>
+            <ChevronLeft className="size-4" />
+          </button>
         </div>
 
-        {/* Main Navigation */}
-        <nav className="flex-1 p-4 overflow-y-auto">
-          <ul className="space-y-2">
+        {/* Collapsed expand affordance */}
+        {isCollapsed && (
+          <button
+            onClick={() => setIsCollapsed(false)}
+            aria-label="Expand sidebar"
+            className="mx-auto mt-2 hidden size-8 items-center justify-center rounded-md text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent hover:text-white lg:inline-flex"
+          >
+            <ChevronRight className="size-4" />
+          </button>
+        )}
+
+        {/* Main navigation */}
+        <nav className="flex-1 overflow-y-auto px-3 py-4">
+          {!isCollapsed && (
+            <p className="px-3 pb-2 text-[11px] font-semibold uppercase tracking-wider text-sidebar-foreground/50">
+              Menu
+            </p>
+          )}
+          <ul className="space-y-1">
             {mainMenuItems.map((item) => {
               const Icon = item.icon;
               const isActive = currentPage === item.id;
@@ -207,29 +179,13 @@ export function NewSidebar({
                     prefetch
                     onClick={() => setIsMobileMenuOpen(false)}
                     aria-current={isActive ? "page" : undefined}
-                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all ${
-                      isActive
-                        ? "bg-gradient-to-r from-[#2F80ED] to-[#56CCF2] text-white shadow-md"
-                        : "text-gray-700 hover:bg-gray-100"
-                    } ${isCollapsed ? "justify-center" : ""}`}
                     title={isCollapsed ? item.label : undefined}
+                    className={navLinkClass(isActive)}
                   >
-                    <Icon className="w-5 h-5 flex-shrink-0" />
-                    <AnimatePresence>
-                      {!isCollapsed && (
-                        <motion.span
-                          initial={{ opacity: 0, width: 0 }}
-                          animate={{
-                            opacity: 1,
-                            width: "auto",
-                          }}
-                          exit={{ opacity: 0, width: 0 }}
-                          className="whitespace-nowrap"
-                        >
-                          {item.label}
-                        </motion.span>
-                      )}
-                    </AnimatePresence>
+                    <Icon className="size-5 shrink-0" />
+                    {!isCollapsed && (
+                      <span className="truncate">{item.label}</span>
+                    )}
                   </Link>
                 </li>
               );
@@ -237,115 +193,79 @@ export function NewSidebar({
           </ul>
         </nav>
 
-        {/* Bottom Section - Settings & Profile */}
-        <div className="border-t border-gray-200 p-4 space-y-2">
-          {/* Settings */}
-          {bottomMenuItems.map((item) => {
-            const Icon = item.icon;
-            const isActive = currentPage === item.id;
-            return (
-              <Link
-                key={item.id}
-                href={hrefFor(item.id)}
-                prefetch
-                onClick={() => setIsMobileMenuOpen(false)}
-                aria-current={isActive ? "page" : undefined}
-                className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all ${
-                  isActive
-                    ? "bg-gradient-to-r from-[#2F80ED] to-[#56CCF2] text-white shadow-md"
-                    : "text-gray-700 hover:bg-gray-100"
-                } ${isCollapsed ? "justify-center" : ""}`}
-                title={isCollapsed ? item.label : undefined}
-              >
-                <Icon className="w-5 h-5 flex-shrink-0" />
-                <AnimatePresence>
-                  {!isCollapsed && (
-                    <motion.span
-                      initial={{ opacity: 0, width: 0 }}
-                      animate={{ opacity: 1, width: "auto" }}
-                      exit={{ opacity: 0, width: 0 }}
-                      className="whitespace-nowrap"
-                    >
-                      {item.label}
-                    </motion.span>
-                  )}
-                </AnimatePresence>
-              </Link>
-            );
-          })}
+        {/* Bottom: settings + profile */}
+        <div className="space-y-1 border-t border-sidebar-border p-3">
+          <Link
+            href={hrefFor("settings")}
+            prefetch
+            onClick={() => setIsMobileMenuOpen(false)}
+            aria-current={currentPage === "settings" ? "page" : undefined}
+            title={isCollapsed ? "Settings" : undefined}
+            className={navLinkClass(currentPage === "settings")}
+          >
+            <Settings className="size-5 shrink-0" />
+            {!isCollapsed && <span className="truncate">Settings</span>}
+          </Link>
 
-          {/* Profile */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <motion.button
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-                className={`w-full flex items-center gap-3 px-3 py-3 rounded-lg hover:bg-gray-100 transition-all ${
-                  isCollapsed ? "justify-center" : ""
-                }`}
+              <button
+                className={cn(
+                  "flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors hover:bg-sidebar-accent",
+                  isCollapsed && "justify-center px-0",
+                )}
               >
-                <Avatar className="w-10 h-10 flex-shrink-0">
+                <Avatar className="size-9 shrink-0">
                   <AvatarImage src={userProfile.avatar ?? ""} />
-                  <AvatarFallback className="bg-gradient-to-br from-[#2F80ED] to-[#56CCF2] text-white">
-                    {userProfile.name
-                      .split(" ")
-                      .map((n) => n[0])
-                      .join("")
-                      .slice(0, 2)
-                      .toUpperCase()}
+                  <AvatarFallback className="bg-sidebar-primary text-sm font-medium text-white">
+                    {initials(userProfile.name)}
                   </AvatarFallback>
                 </Avatar>
-                <AnimatePresence>
-                  {!isCollapsed && (
-                    <motion.div
-                      initial={{ opacity: 0, width: 0 }}
-                      animate={{ opacity: 1, width: "auto" }}
-                      exit={{ opacity: 0, width: 0 }}
-                      className="flex-1 text-left overflow-hidden"
-                    >
-                      <p className="text-sm text-[#333333] truncate">
-                        {userProfile.name}
-                      </p>
-                      <p className="text-xs text-gray-500 truncate">
-                        {userProfile.role}
-                      </p>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </motion.button>
+                {!isCollapsed && (
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium text-white">
+                      {userProfile.name}
+                    </p>
+                    <p className="truncate text-xs text-sidebar-foreground/70">
+                      {userProfile.role}
+                    </p>
+                  </div>
+                )}
+              </button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-56">
-              <div className="px-2 py-2">
-                <p className="text-sm font-medium text-[#333333]">
+            <DropdownMenuContent align="end" side="top" className="w-56">
+              <DropdownMenuLabel className="font-normal">
+                <p className="text-sm font-medium text-foreground">
                   {userProfile.name}
                 </p>
-                <p className="text-xs text-gray-500">
+                <p className="text-xs text-muted-foreground">
                   {userProfile.email}
                 </p>
-              </div>
+              </DropdownMenuLabel>
               <DropdownMenuSeparator />
               <DropdownMenuItem asChild>
                 <Link href="/settings?tab=profile">
-                  <User className="w-4 h-4 mr-2" />
-                  Profile Settings
+                  <User className="size-4" />
+                  Profile settings
                 </Link>
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <form action={signout}>
-                <DropdownMenuItem asChild className="text-red-600">
-                  <button
-                    type="submit"
-                    className="w-full flex items-center cursor-pointer"
-                  >
-                    <LogOut className="w-4 h-4 mr-2" />
-                    Logout
+                <DropdownMenuItem
+                  variant="destructive"
+                  asChild
+                  className="cursor-pointer"
+                >
+                  <button type="submit" className="w-full">
+                    <LogOut className="size-4" />
+                    Log out
                   </button>
                 </DropdownMenuItem>
               </form>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
-      </motion.aside>
+      </aside>
     </>
   );
 }

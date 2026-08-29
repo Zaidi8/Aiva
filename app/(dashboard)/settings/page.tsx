@@ -71,7 +71,7 @@ export default async function SettingsRoute({
   const { tab } = await searchParams;
   const initialTab = tab && tab.length > 0 ? tab : 'profile';
   return (
-    <Suspense fallback={<div className="p-8 text-gray-500">Loading settings...</div>}>
+    <Suspense fallback={<div className="p-8 text-muted-foreground">Loading settings...</div>}>
       <SettingsPageContent tab={initialTab} />
     </Suspense>
   );
