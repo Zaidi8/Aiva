@@ -28,6 +28,17 @@ from livekit.agents import RunContext, function_tool
 logger = logging.getLogger("aiva.tools")
 
 
+def _fmt_time_12h(hhmm: str) -> str:
+    """Convert '14:30' → '2:30 PM' for spoken output."""
+    try:
+        h, m = (int(x) for x in hhmm.split(":"))
+        suffix = "PM" if h >= 12 else "AM"
+        h12 = h % 12 or 12
+        return f"{h12}:{m:02d} {suffix}" if m else f"{h12} {suffix}"
+    except Exception:
+        return hhmm
+
+
 def _say_filler(context: RunContext, text: str) -> None:
     """Speak a brief acknowledgement before a slow backend round-trip.
 
@@ -172,12 +183,12 @@ def build_tools(config: ToolConfig) -> list:
 
         # Time-specific path (Phase 5 #3/#4): answer about the requested time only.
         if data.get("requestedTime"):
-            req = data["requestedTime"]
+            req = _fmt_time_12h(data["requestedTime"])
             if data.get("totalSlots", 0) == 0:
                 return f"{doctor} has no open times on {date} at all."
             if data.get("requestedAvailable"):
                 return f"Yes — {doctor} has {req} open on {date}."
-            nearest = data.get("nearest") or []
+            nearest = [_fmt_time_12h(t) for t in (data.get("nearest") or [])]
             if not nearest:
                 return f"{doctor} doesn't have {req} open on {date}, and has no other times that day."
             return (
@@ -187,7 +198,7 @@ def build_tools(config: ToolConfig) -> list:
             )
 
         # No specific time asked: offer a few times and invite the caller to pick.
-        slots = data.get("slots") or []
+        slots = [_fmt_time_12h(t) for t in (data.get("slots") or [])]
         total = data.get("totalSlots", len(slots))
         if not slots:
             return f"{doctor} has no open slots on {date}."
@@ -232,7 +243,15 @@ def build_tools(config: ToolConfig) -> list:
         and the caller said yes to a read-back. `date` YYYY-MM-DD, `time` "HH:mm"
         matching an open slot, `phone` the caller's number, `patient_name` their
         full name (needed for a first-time caller)."""
+        import re
         _say_filler(context, "Okay, booking that now.")
+        # Safety net: reject empty / obviously fake phone numbers.
+        digits = re.sub(r"\D", "", phone or "")
+        if len(digits) < 7:
+            return (
+                "I need the caller's real phone number before I can book. "
+                "Please ask them for their phone number."
+            )
         body: dict[str, Any] = {
             "doctorName": doctor_name,
             "date": date,

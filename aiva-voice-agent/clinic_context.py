@@ -22,6 +22,17 @@ import aiohttp
 
 logger = logging.getLogger("aiva.clinic_context")
 
+
+def _fmt_time_12h(hhmm: str) -> str:
+    """Convert '14:30' → '2:30 PM' for spoken output."""
+    try:
+        h, m = (int(x) for x in hhmm.split(":"))
+        suffix = "PM" if h >= 12 else "AM"
+        h12 = h % 12 or 12
+        return f"{h12}:{m:02d} {suffix}" if m else f"{h12} {suffix}"
+    except Exception:
+        return hhmm  # fall back to raw if unparseable
+
 # The context endpoint does several DB round-trips; from a backend that sits far
 # from the DB region this can take a few seconds. 2.5s was too tight and caused
 # intermittent timeouts → the fallback "technical issue" greeting even when the
@@ -174,7 +185,7 @@ def render_system_prompt(context: dict[str, Any], today: str | None = None) -> s
                 start = s.get("startTime", "")
                 end = s.get("endTime", "")
                 if day and start and end:
-                    sched_parts.append(f"{day[:3]} {start}–{end}")
+                    sched_parts.append(f"{day[:3]} {_fmt_time_12h(start)}–{_fmt_time_12h(end)}")
             sched_str = ""
             if sched_parts:
                 sched_str = f" (works: {', '.join(sched_parts)})"
@@ -194,8 +205,13 @@ def render_system_prompt(context: dict[str, Any], today: str | None = None) -> s
     if today:
         lines.append(
             f"- Today's date is {today}. Resolve relative dates the caller says "
-            "(\"tomorrow\", \"next Monday\", \"the 14th\") to an exact YYYY-MM-DD "
-            "yourself before using a tool — the tools only accept YYYY-MM-DD."
+            "(\"tomorrow\", \"next Monday\", \"coming Thursday\", \"the 14th\") to "
+            "an exact YYYY-MM-DD yourself before using a tool — the tools only "
+            "accept YYYY-MM-DD. IMPORTANT: when the caller says \"coming\" or "
+            "\"next\" followed by a day name, always pick the NEXT occurrence of "
+            "that day — never today, even if today IS that day. For example, if "
+            "today is Thursday and the caller says \"coming Thursday\", pick the "
+            "following Thursday, not today."
         )
     lines.append(
         "- Look at each doctor's working days above BEFORE calling check_availability. "
@@ -228,8 +244,9 @@ def render_system_prompt(context: dict[str, Any], today: str | None = None) -> s
         "pick the new time out loud."
     )
     lines.append(
-        "2. Ask the caller for their full name and phone number. You must hear "
-        "both from the caller — never make up or guess these values."
+        "2. Ask the caller for their full name and phone number. WAIT for them to "
+        "answer — do NOT proceed until you hear a real name and phone number spoken "
+        "by the caller. Never make up, guess, or fill in these values yourself."
     )
     lines.append(
         "3. Read the whole booking back — doctor, date, time, and name — using "
