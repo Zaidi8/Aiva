@@ -28,7 +28,7 @@ export const runtime = "nodejs";
 const bodySchema = z.object({
   eventId: z.string().min(1),
   providerCallId: z.string().min(1),
-  endedAt: z.string().datetime().optional(),
+  endedAt: z.string().datetime().nullish().transform((v) => v ?? undefined),
   durationSec: z.number().int().min(0).optional(),
   outcome: z.nativeEnum(CallOutcome).optional(),
   detectedIntent: z.nativeEnum(CallType).optional(),

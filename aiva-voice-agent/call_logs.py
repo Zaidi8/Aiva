@@ -31,34 +31,68 @@ _HEADER_SECRET = "x-webhook-secret"
 _MAX_RETRIES = 2
 
 
+def _compact(*, payload: dict[str, Any], **kw) -> dict[str, Any]:
+    """Return a payload dict with only non-None keys.
+
+    The backend zod schemas use `.optional()` which rejects `null` for a field
+    (e.g. `at`, `startedAt`). Dropping `None` values means we simply omit the
+    field instead of sending `null`, so validation always passes.
+    """
+    out = dict(payload)
+    for key, value in kw.items():
+        if value is not None:
+            out[key] = value
+    return out
+
+
 class _AsyncRateLimitedClient:
-    """Minimal shared aiohttp client with a soft concurrency cap so a flurry of
-    transcript turns can't saturate the event loop or hammer the backend."""
+    """Shared aiohttp client with a soft concurrency cap so a flurry of
+    transcript turns can't saturate the event loop or hammer the backend.
+
+    A single long-lived session is reused across calls (a fresh ClientSession
+    per POST paid cold-connection latency each time, which caused intermittent
+    `Connection timeout to host` failures against the Vercel function). Both
+    non-200 responses and network exceptions are retried up to `attempts`
+    times; every failure is logged and swallowed (fail-soft)."""
 
     def __init__(self, backend_url: str, secret: str, max_concurrency: int = 4) -> None:
         self.base = backend_url.rstrip("/")
         self.secret = secret
         self._sem = asyncio.Semaphore(max_concurrency)
+        self._session: aiohttp.ClientSession | None = None
+
+    async def _get_session(self) -> aiohttp.ClientSession:
+        if self._session is None or self._session.closed:
+            timeout = aiohttp.ClientTimeout(total=_TIMEOUT_S, connect=5.0)
+            self._session = aiohttp.ClientSession(timeout=timeout)
+        return self._session
 
     async def post(self, path: str, payload: dict[str, Any], attempts: int = 1) -> bool:
         url = f"{self.base}{path}"
-        timeout = aiohttp.ClientTimeout(total=_TIMEOUT_S, connect=3.0)
         async with self._sem:
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.post(
-                    url,
-                    json=payload,
-                    headers={_HEADER_SECRET: self.secret},
-                ) as resp:
-                    if resp.status != 200:
+            for attempt in range(attempts):
+                try:
+                    session = await self._get_session()
+                    async with session.post(
+                        url,
+                        json=payload,
+                        headers={_HEADER_SECRET: self.secret},
+                    ) as resp:
+                        if resp.status == 200:
+                            return True
                         body = await resp.text()
                         logger.warning(
                             "call-log POST %s -> %s: %s", path, resp.status, body[:200]
                         )
-                        if attempts > 1:
-                            return await self.post(path, payload, attempts - 1)
-                        return False
-        return True
+                except (aiohttp.ClientError, asyncio.TimeoutError, OSError) as exc:
+                    logger.warning(
+                        "call-log POST %s error (attempt %d/%d): %s",
+                        path,
+                        attempt + 1,
+                        attempts,
+                        exc,
+                    )
+        return False
 
 
 async def start_call(
@@ -100,13 +134,15 @@ async def append_turn(
     """Append one transcript turn (user | assistant). Dedup-safe via eventId."""
     return await client.post(
         "/api/voice/transcript-chunk",
-        {
-            "eventId": f"{provider_call_id}.turn.{seq}",
-            "providerCallId": provider_call_id,
-            "role": role,
-            "text": text,
-            "at": at,
-        },
+        _compact(
+            payload={
+                "eventId": f"{provider_call_id}.turn.{seq}",
+                "providerCallId": provider_call_id,
+                "role": role,
+                "text": text,
+            },
+            at=at,
+        ),
         attempts=_MAX_RETRIES,
     )
 

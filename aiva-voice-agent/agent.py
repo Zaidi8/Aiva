@@ -289,7 +289,7 @@ class CallLogger:
         await end_call(
             client=self._client,
             provider_call_id=self._provider_call_id,
-            endedAt=datetime.now(timezone.utc).isoformat(),
+            ended_at=datetime.now(timezone.utc).isoformat(),
             duration_sec=duration,
             outcome=outcome,
             detected_intent="Booking" if self._appointment_id else "Inquiry",

@@ -29,7 +29,7 @@ const bodySchema = z.object({
   providerCallId: z.string().min(1),
   to: z.string().min(3),
   from: z.string().min(3),
-  startedAt: z.string().datetime().optional(),
+  startedAt: z.string().datetime().nullish().transform((v) => v ?? undefined),
   clinicId: z.string().cuid().optional(),
 });
 

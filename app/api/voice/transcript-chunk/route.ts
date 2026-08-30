@@ -22,7 +22,7 @@ const bodySchema = z.object({
   providerCallId: z.string().min(1),
   role: z.enum(["user", "assistant", "system"]),
   text: z.string().min(1),
-  at: z.string().datetime().optional(),
+  at: z.string().datetime().nullish().transform((v) => v ?? undefined),
 });
 
 export const POST = withWebhookSecret(async (req) => {
