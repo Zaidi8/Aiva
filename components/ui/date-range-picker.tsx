@@ -301,7 +301,7 @@ export default function DateRangePicker({
         onClick={() => !disabled && setIsOpen(!isOpen)}
         disabled={disabled}
         className={`
-          h-[34px] flex items-center justify-between px-3 bg-card border rounded-md text-[12px] font-medium transition-all duration-150
+          h-10 flex items-center justify-between px-3 bg-card border rounded-md text-sm font-medium transition-all duration-150
           ${
             disabled
               ? "opacity-50 cursor-not-allowed border-input"

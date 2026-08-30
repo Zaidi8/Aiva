@@ -292,6 +292,12 @@
   html {
     -webkit-text-size-adjust: 100%;
     text-size-adjust: 100%;
+    /* App-shell UI: the dashboard/settings pages scroll inside <main>, so the
+       document itself must never scroll. Without this, tall page content that
+       overflows <main> escapes into the html box and produces a second,
+       blank window scrollbar (double-scroll bug). */
+    overflow: hidden;
+    height: 100%;
   }
 
   body {
@@ -301,6 +307,8 @@
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     text-rendering: optimizeLegibility;
+    overflow: hidden;
+    height: 100%;
   }
 
   /*

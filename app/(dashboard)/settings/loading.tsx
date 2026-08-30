@@ -3,7 +3,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 
 export default function Loading() {
   return (
-    <div className="min-h-screen bg-background">
+    <>
       <PageHeaderSkeleton withAction={false} />
       <div className="p-8 max-w-5xl mx-auto space-y-8">
         {/* Tabs bar */}
@@ -11,6 +11,6 @@ export default function Loading() {
         <SkeletonCard lines={5} />
         <SkeletonCard lines={4} />
       </div>
-    </div>
+    </>
   );
 }

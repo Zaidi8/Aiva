@@ -121,6 +121,28 @@ export function PatientsPage({
     });
   }, [initialPatients, showEmptyState, searchQuery, dateRange]);
 
+  const selectedRangeCount = useMemo(
+    () =>
+      initialPatients.filter((p) => {
+        if (!dateRange.start || !dateRange.end) return true;
+        const created = new Date(p.createdAt).getTime();
+        return (
+          created >= new Date(dateRange.start).getTime() &&
+          created <= new Date(dateRange.end).getTime()
+        );
+      }).length,
+    [initialPatients, dateRange],
+  );
+
+  // Average age across the loaded page (best-effort summary stat).
+  const averageAge = useMemo(() => {
+    const ages = initialPatients.map((p) => p.age).filter(
+      (a): a is number => typeof a === 'number',
+    );
+    if (ages.length === 0) return null;
+    return Math.round(ages.reduce((sum, a) => sum + a, 0) / ages.length);
+  }, [initialPatients]);
+
   const totalPages = Math.max(
     1,
     Math.ceil(filteredPatients.length / itemsPerPage),
@@ -169,16 +191,20 @@ export function PatientsPage({
               hint={isPending ? 'Updating…' : undefined}
             />
             <StatCard
-              label="Showing"
-              value={filteredPatients.length}
-              icon={<Eye />}
-              accent="info"
+              label={
+                dateRange.start && dateRange.end
+                  ? 'New (selected period)'
+                  : 'Newly added'
+              }
+              value={selectedRangeCount}
+              icon={<Calendar />}
+              accent="success"
             />
             <StatCard
-              label="Page"
-              value={`${currentPage} / ${totalPages}`}
+              label="Average age"
+              value={averageAge != null ? averageAge : '—'}
               icon={<LayoutGrid />}
-              accent="teal"
+              accent="info"
             />
           </div>
         )}

@@ -29,7 +29,7 @@ export function DashboardShell({
   };
 
   return (
-    <div className="flex h-screen bg-background">
+    <div className="flex h-screen overflow-hidden bg-background">
       <NewSidebar
         currentPage={getCurrentPage() as PageType}
         userProfile={userProfile}

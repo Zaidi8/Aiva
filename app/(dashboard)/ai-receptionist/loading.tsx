@@ -8,9 +8,9 @@ import { Skeleton } from '@/components/ui/skeleton';
 
 export default function Loading() {
   return (
-    <div className="min-h-screen bg-background">
+    <>
       <PageHeaderSkeleton withDescription={false} />
-      <div className="p-6 max-w-7xl mx-auto space-y-6">
+      <div className="mx-auto max-w-7xl space-y-6 p-6">
         <SkeletonStatsRow />
         <Skeleton className="h-12 w-full rounded-md" />
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -31,6 +31,6 @@ export default function Loading() {
           </Card>
         </div>
       </div>
-    </div>
+    </>
   );
 }

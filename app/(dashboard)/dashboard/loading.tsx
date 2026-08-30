@@ -7,9 +7,9 @@ import { Skeleton } from '@/components/ui/skeleton';
 
 export default function Loading() {
   return (
-    <div className="min-h-screen bg-background">
+    <>
       <PageHeaderSkeleton withDescription={false} />
-      <div className="p-6 max-w-7xl mx-auto space-y-8">
+      <div className="mx-auto max-w-7xl space-y-8 p-6">
         <SkeletonStatsRow />
         {/* AI status card */}
         <Skeleton className="h-40 w-full rounded-xl" />
@@ -24,6 +24,6 @@ export default function Loading() {
           </CardContent>
         </Card>
       </div>
-    </div>
+    </>
   );
 }

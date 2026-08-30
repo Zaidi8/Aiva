@@ -1,102 +1,51 @@
 'use client';
 
-// TopBar — page title + notification bell.
+// TopBar — page title + optional action button.
 //
-// The bell fetches from /api/notifications on mount. We deliberately don't
-// poll: the dashboard isn't a real-time product yet, and a single fetch is
-// enough to surface anything the AI receptionist has dropped into the table
-// since the page loaded. router.refresh() on relevant pages will re-render
-// the layout and re-fire this effect.
-//
-// "Unread" maps to the server's `unread` field (notifications with status
-// Pending or Failed). When the count is 0 we still render the bell but with
-// no badge — same shape as the AI Receptionist page's empty state.
+// The notification bell is temporarily disabled (the /api/notifications fetch
+// was slow and added noise). Re-enable the commented block once notifications
+// are wired end-to-end.
 
-import { Bell } from 'lucide-react';
-import { Button } from './button';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-  DropdownMenuSeparator,
-} from './dropdown-menu';
-import { ScrollArea } from './scroll-area';
-import { ReactNode, useEffect, useState } from 'react';
-import { apiGet } from '@/lib/client/fetcher';
+import { ReactNode } from 'react';
+
+// Notification-bell imports kept commented out alongside the disabled feature:
+//   import { Button } from './button';
+//   import { Bell } from 'lucide-react';
+//   import { DropdownMenu, DropdownMenuContent, DropdownMenuItem,
+//            DropdownMenuTrigger, DropdownMenuSeparator } from './dropdown-menu';
+//   import { ScrollArea } from './scroll-area';
+//   import { useEffect, useState } from 'react';
+//   import { apiGet } from '@/lib/client/fetcher';
 
 interface TopBarProps {
   title: string;
   description?: string;
   onNotificationsClick?: () => void;
   // Deprecated: notificationCount was used while we still had mockNotifications.
-  // Kept on the prop type so legacy callers compile; we ignore it and read
-  // the unread count from the API on mount instead.
+  // Kept on the prop type so legacy callers compile; ignored now.
   notificationCount?: number;
   actionButton?: ReactNode;
 }
 
-interface NotificationListItem {
-  id: string;
-  type: string;
-  channel: string;
-  status: string;
-  message: string;
-  createdAt: string;
-  patient: { id: string; fullName: string };
-}
+// Notification model, kept alongside the disabled feature:
+// interface NotificationListItem {
+//   id: string;
+//   type: string;
+//   channel: string;
+//   status: string;
+//   message: string;
+//   createdAt: string;
+//   patient: { id: string; fullName: string };
+// }
+//
+// interface NotificationListPayload {
+//   items: NotificationListItem[];
+//   total: number;
+//   unread: number;
+// }
 
-interface NotificationListPayload {
-  items: NotificationListItem[];
-  total: number;
-  unread: number;
-}
-
-function relativeTime(iso: string): string {
-  const now = Date.now();
-  const t = new Date(iso).getTime();
-  if (Number.isNaN(t)) return '';
-  const sec = Math.floor((now - t) / 1000);
-  if (sec < 60) return `${sec}s ago`;
-  const min = Math.floor(sec / 60);
-  if (min < 60) return `${min}m ago`;
-  const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr}h ago`;
-  const day = Math.floor(hr / 24);
-  return `${day}d ago`;
-}
 
 export function TopBar({ title, description, actionButton }: TopBarProps) {
-  const [items, setItems] = useState<NotificationListItem[]>([]);
-  const [unread, setUnread] = useState(0);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    // `loading` defaults to true via useState so we don't set it again here —
-    // a synchronous setState inside an effect would trigger the
-    // react-hooks/set-state-in-effect rule. The async callbacks below do
-    // their own state writes once data lands.
-    let cancelled = false;
-    apiGet<NotificationListPayload>('/api/notifications?take=10')
-      .then((data) => {
-        if (cancelled) return;
-        setItems(data.items);
-        setUnread(data.unread);
-      })
-      .catch(() => {
-        if (cancelled) return;
-        // Silent: don't surface every bell-fetch failure as a toast.
-        setItems([]);
-        setUnread(0);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
   return (
     <div className="sticky top-0 z-30 border-b border-border bg-card/80 px-6 py-4 backdrop-blur-sm">
       <div className="mx-auto flex max-w-7xl items-center justify-between">
@@ -114,7 +63,10 @@ export function TopBar({ title, description, actionButton }: TopBarProps) {
         <div className="flex items-center gap-3">
           {actionButton}
 
-          <DropdownMenu>
+          {/* Notification bell temporarily disabled: the /api/notifications
+              fetch was slow and the empty-state adds layout noise. Re-enable
+              when notifications are wired end-to-end. */}
+          {/* <DropdownMenu onOpenChange={setIsOpen}>
             <DropdownMenuTrigger asChild>
               <Button
                 variant="outline"
@@ -175,7 +127,7 @@ export function TopBar({ title, description, actionButton }: TopBarProps) {
                 )}
               </ScrollArea>
             </DropdownMenuContent>
-          </DropdownMenu>
+          </DropdownMenu> */}
         </div>
       </div>
     </div>

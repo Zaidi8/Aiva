@@ -9,7 +9,7 @@
 import { Skeleton } from './skeleton';
 import { Card, CardContent } from './card';
 
-// Mirrors TopBar's sticky header (px-6 py-4, h1 text-2xl + optional subtitle,
+// Mirrors TopBar's sticky header (px-6 py-4, h1 text-xl + optional subtitle,
 // right-aligned action). Rendered by loading.tsx so there's no header jump when
 // the real page (which renders its own TopBar) takes over.
 export function PageHeaderSkeleton({
@@ -20,37 +20,39 @@ export function PageHeaderSkeleton({
   withAction?: boolean;
 }) {
   return (
-    <div className="sticky top-0 z-30 bg-white border-b border-gray-200 px-6 py-4">
-      <div className="flex items-center justify-between max-w-7xl mx-auto">
+    <div className="sticky top-0 z-30 border-b border-border bg-card/80 px-6 py-4 backdrop-blur-sm">
+      <div className="mx-auto flex max-w-7xl items-center justify-between">
         <div className="space-y-2">
-          <Skeleton className="h-7 w-48" />
+          <Skeleton className="h-6 w-48" />
           {withDescription && <Skeleton className="h-4 w-72" />}
         </div>
         <div className="flex items-center gap-3">
           {withAction && <Skeleton className="h-10 w-40 rounded-md" />}
-          <Skeleton className="h-9 w-9 rounded-md" />
         </div>
       </div>
     </div>
   );
 }
 
-// A single stat tile (mirrors StatsBar / dashboard stat cards).
+// A single stat tile (mirrors the new StatCard: label + value on the left,
+// circular accent icon on the right).
 export function SkeletonStat() {
   return (
-    <Card className="border-none">
-      <CardContent className="p-6">
-        <Skeleton className="h-10 w-10 rounded-lg mb-3" />
-        <Skeleton className="h-4 w-24 mb-2" />
-        <Skeleton className="h-8 w-16" />
-      </CardContent>
+    <Card className="gap-0 p-6">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0 space-y-1.5">
+          <Skeleton className="h-4 w-24" />
+          <Skeleton className="h-7 w-16" />
+        </div>
+        <Skeleton className="size-11 rounded-xl" />
+      </div>
     </Card>
   );
 }
 
 export function SkeletonStatsRow({ count = 4 }: { count?: number }) {
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+    <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
       {Array.from({ length: count }).map((_, i) => (
         <SkeletonStat key={i} />
       ))}

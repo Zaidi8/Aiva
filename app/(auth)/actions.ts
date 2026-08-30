@@ -19,13 +19,23 @@ export async function login(formData: FormData): Promise<ActionResult> {
   }
 
   const supabase = await createClient();
-  const { error } = await supabase.auth.signInWithPassword({ email, password });
+  const { data, error } = await supabase.auth.signInWithPassword({
+    email,
+    password,
+  });
 
   if (error) {
     return { error: error.message };
   }
 
   revalidatePath("/", "layout");
+
+  // If this login used a temp password (provisioned team member), force a real
+  // password before granting dashboard access.
+  if (data.session?.user?.user_metadata?.must_change_password) {
+    redirect("/set-password");
+  }
+
   redirect("/dashboard");
 }
 
@@ -136,6 +146,44 @@ export async function register(formData: FormData): Promise<ActionResult> {
   // doctor → invite team). Returning users log in straight to the dashboard.
   revalidatePath("/", "layout");
   redirect("/onboarding");
+}
+
+export type SetPasswordAction = ActionResult;
+
+export async function setPassword(formData: FormData): Promise<SetPasswordAction> {
+  const password = String(formData.get("password") ?? "");
+  const confirm = String(formData.get("confirmPassword") ?? "");
+
+  if (password.length < 8) {
+    return { error: "Password must be at least 8 characters." };
+  }
+  if (password !== confirm) {
+    return { error: "Passwords do not match." };
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    return { error: "Your session expired. Please log in again." };
+  }
+
+  const { error: updateError } = await supabase.auth.updateUser({ password });
+  if (updateError) {
+    return { error: updateError.message };
+  }
+
+  // Clear the forced-change flag so the next login goes straight to dashboard.
+  const { error: metaError } = await supabase.auth.updateUser({
+    data: { must_change_password: false },
+  });
+  if (metaError) {
+    return { error: metaError.message };
+  }
+
+  revalidatePath("/", "layout");
+  redirect("/dashboard");
 }
 
 export async function signout(): Promise<void> {

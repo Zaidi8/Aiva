@@ -54,7 +54,13 @@ export async function createStaffUser(
     email: input.email,
     password: tempPassword,
     email_confirm: true,
-    user_metadata: { full_name: input.fullName },
+    user_metadata: {
+      full_name: input.fullName,
+      // Team members are provisioned with a temp password; flagging them here
+      // lets the login flow force a real password change before they can use
+      // the dashboard. Cleared by the set-password action.
+      must_change_password: true,
+    },
   });
   if (error || !data.user) {
     throw new StaffProvisionError(

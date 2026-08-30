@@ -18,6 +18,7 @@ import {
   Clock,
   User,
   Plus,
+  Check,
 } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
@@ -35,6 +36,8 @@ import {
 import { Calendar } from '../ui/calendar';
 import { TopBar } from '../ui/TopBar';
 import { PaginationBar } from '../ui/PaginationBar';
+import { apiPatch, ApiError } from '@/lib/client/fetcher';
+import { toast } from 'sonner';
 import { NewAppointmentModal } from '../ui/NewAppointmentModal';
 import type { AppointmentStatus, AppointmentType } from '@prisma/client';
 
@@ -125,6 +128,18 @@ export function AppointmentsPage({
 
   const refresh = () => {
     startTransition(() => router.refresh());
+  };
+
+  const confirmAppointment = async (id: string, patientName: string) => {
+    try {
+      await apiPatch(`/api/appointments/${id}`, { status: 'Confirmed' });
+      toast.success(`${patientName}'s appointment confirmed.`);
+      refresh();
+    } catch (err) {
+      toast.error(
+        err instanceof ApiError ? err.message : 'Could not confirm appointment.',
+      );
+    }
   };
 
   // Filter pipeline.
@@ -344,6 +359,21 @@ export function AppointmentsPage({
                   <div className="flex flex-wrap items-center gap-2">
                     <Badge variant="secondary">{appointment.type}</Badge>
                     <StatusBadge status={appointment.status} />
+                    {appointment.status === 'Pending' && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() =>
+                          confirmAppointment(
+                            appointment.id,
+                            appointment.patient.fullName,
+                          )
+                        }
+                      >
+                        <Check />
+                        Approve
+                      </Button>
+                    )}
                   </div>
                 </li>
               ))}

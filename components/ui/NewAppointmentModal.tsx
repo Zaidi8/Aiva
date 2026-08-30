@@ -242,9 +242,7 @@ export function NewAppointmentModal({
         type: selectedType,
         notes: notes.trim() || undefined,
       });
-      toast.success('Appointment created.', {
-        description: 'The patient will receive a confirmation message.',
-      });
+      toast.success('Appointment added.');
       onCreated?.();
       onClose();
     } catch (err) {

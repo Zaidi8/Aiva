@@ -4,9 +4,9 @@ import { Skeleton } from '@/components/ui/skeleton';
 
 export default function Loading() {
   return (
-    <div className="min-h-screen bg-background">
+    <>
       <PageHeaderSkeleton />
-      <div className="p-6 max-w-7xl mx-auto space-y-6">
+      <div className="mx-auto max-w-7xl space-y-6 p-6">
         {/* Calendar + summary row */}
         <Card>
           <CardContent className="p-6">
@@ -24,6 +24,6 @@ export default function Loading() {
         <SkeletonToolbar />
         <SkeletonList rows={4} />
       </div>
-    </div>
+    </>
   );
 }

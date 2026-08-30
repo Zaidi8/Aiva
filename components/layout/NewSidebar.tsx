@@ -116,7 +116,7 @@ export function NewSidebar({ currentPage, userProfile }: SidebarProps) {
       {/* Sidebar rail */}
       <aside
         className={cn(
-          "flex flex-col bg-sidebar text-sidebar-foreground border-r border-sidebar-border",
+          "relative flex flex-col bg-sidebar text-sidebar-foreground border-r border-sidebar-border",
           "fixed inset-y-0 left-0 z-40 lg:static",
           "transition-[width,transform] duration-200 ease-out",
           isCollapsed ? "w-[76px]" : "w-64",
@@ -125,7 +125,7 @@ export function NewSidebar({ currentPage, userProfile }: SidebarProps) {
             : "-translate-x-full lg:translate-x-0",
         )}
       >
-        {/* Header: logo + collapse toggle */}
+        {/* Header: logo only (collapse toggle lives at the bottom) */}
         <div
           className={cn(
             "flex h-16 items-center gap-3 border-b border-sidebar-border px-4",
@@ -138,28 +138,7 @@ export function NewSidebar({ currentPage, userProfile }: SidebarProps) {
               Aiva
             </span>
           )}
-          <button
-            onClick={() => setIsCollapsed((v) => !v)}
-            aria-label={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-            className={cn(
-              "ml-auto hidden size-8 items-center justify-center rounded-md text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent hover:text-white lg:inline-flex",
-              isCollapsed && "hidden",
-            )}
-          >
-            <ChevronLeft className="size-4" />
-          </button>
         </div>
-
-        {/* Collapsed expand affordance */}
-        {isCollapsed && (
-          <button
-            onClick={() => setIsCollapsed(false)}
-            aria-label="Expand sidebar"
-            className="mx-auto mt-2 hidden size-8 items-center justify-center rounded-md text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent hover:text-white lg:inline-flex"
-          >
-            <ChevronRight className="size-4" />
-          </button>
-        )}
 
         {/* Main navigation */}
         <nav className="flex-1 overflow-y-auto px-3 py-4">
@@ -192,6 +171,21 @@ export function NewSidebar({ currentPage, userProfile }: SidebarProps) {
             })}
           </ul>
         </nav>
+
+        {/* Floating collapse / expand toggle — circular icon on the sidebar's
+            right edge, sitting just above the Settings/profile footer. */}
+        <button
+          onClick={() => setIsCollapsed((v) => !v)}
+          aria-label={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+          title={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+          className="absolute -right-3 bottom-40 z-10 hidden size-8 items-center justify-center rounded-full border border-sidebar-border bg-sidebar text-sidebar-foreground shadow-md transition-colors hover:bg-sidebar-accent hover:text-white lg:flex"
+        >
+          {isCollapsed ? (
+            <ChevronRight className="size-4" />
+          ) : (
+            <ChevronLeft className="size-4" />
+          )}
+        </button>
 
         {/* Bottom: settings + profile */}
         <div className="space-y-1 border-t border-sidebar-border p-3">

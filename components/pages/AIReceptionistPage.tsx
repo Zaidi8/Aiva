@@ -46,6 +46,7 @@ import {
 import { ScrollArea } from '../ui/scroll-area';
 import { TopBar } from '../ui/TopBar';
 import { cn } from '../ui/utils';
+import DateRangePicker from '../ui/date-range-picker';
 
 interface AIReceptionistPageProps {
   // Server-fetched by app/(dashboard)/ai-receptionist/page.tsx and passed as
@@ -97,6 +98,25 @@ function formatTime(iso: string | null): string {
     hour: 'numeric',
     minute: '2-digit',
     hour12: true,
+  });
+}
+
+// Local YYYY-MM-DD key (used for "history day" grouping + date-range compare).
+function toDateKey(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${m}-${day}`;
+}
+
+function formatDayLabel(iso: string): string {
+  const d = new Date(iso);
+  return d.toLocaleDateString('en-US', {
+    weekday: 'long',
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
   });
 }
 
@@ -164,6 +184,10 @@ export function AIReceptionistPage({
   const [selectedCallId, setSelectedCallId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [outcomeFilter, setOutcomeFilter] = useState('all');
+  const [dateRange, setDateRange] = useState<{
+    start: string | null;
+    end: string | null;
+  }>({ start: null, end: null });
 
   const filteredCalls = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -175,9 +199,31 @@ export function AIReceptionistPage({
         call.patientPhone.toLowerCase().includes(q);
       const matchesOutcome =
         outcomeFilter === 'all' || call.outcome === outcomeFilter;
-      return matchesSearch && matchesOutcome;
+      const key = toDateKey(call.startedAt);
+      const matchesDate =
+        !dateRange.start || !dateRange.end
+          ? true
+          : key !== '' &&
+            key >= dateRange.start &&
+            key <= dateRange.end;
+      return matchesSearch && matchesOutcome && matchesDate;
     });
-  }, [calls, searchQuery, outcomeFilter]);
+  }, [calls, searchQuery, outcomeFilter, dateRange]);
+
+  // Group the filtered calls into day buckets for a history view. Each bucket
+  // maps a YYYY-MM-DD key to its calls, newest day first (calls already sorted
+  // desc by startedAt server-side, so list order is preserved within a day).
+  const historyGroups = useMemo(() => {
+    const groups = new Map<string, ApiCallLog[]>();
+    for (const call of filteredCalls) {
+      const key = toDateKey(call.startedAt);
+      if (!key) continue;
+      const bucket = groups.get(key);
+      if (bucket) bucket.push(call);
+      else groups.set(key, [call]);
+    }
+    return Array.from(groups.entries());
+  }, [filteredCalls]);
 
   // Pick the active call: explicit selection wins, otherwise default to the
   // first item in the filtered list. Computed during render to avoid an
@@ -250,6 +296,7 @@ export function AIReceptionistPage({
               className="pl-9"
             />
           </div>
+          <DateRangePicker value={dateRange} onChange={setDateRange} />
           <Select value={outcomeFilter} onValueChange={setOutcomeFilter}>
             <SelectTrigger className="w-full sm:w-44">
               <SelectValue placeholder="Filter by outcome" />
@@ -309,67 +356,82 @@ export function AIReceptionistPage({
                   </div>
                 ) : (
                   <ScrollArea className="h-full">
-                    <ul className="divide-y divide-border">
-                      {filteredCalls.map((call) => {
-                        const Icon = intentIcon(call.detectedIntent);
-                        const badge = outcomeBadge(call.outcome);
-                        const isSelected = selectedCall?.id === call.id;
-                        const name = call.patient?.fullName ?? call.patientPhone;
-                        return (
-                          <li key={call.id} className="relative">
-                            <button
-                              type="button"
-                              onClick={() => setSelectedCallId(call.id)}
-                              className={cn(
-                                'flex w-full items-center gap-4 px-6 py-4 text-left transition-colors',
-                                isSelected
-                                  ? 'bg-primary-muted/50'
-                                  : 'hover:bg-muted/60',
-                              )}
-                            >
-                              {isSelected && (
-                                <span className="absolute inset-y-3 left-0 w-[3px] rounded-r-full bg-primary" />
-                              )}
-                              <div
-                                className={cn(
-                                  'flex size-11 shrink-0 items-center justify-center rounded-full [&_svg]:size-5',
-                                  isSelected
-                                    ? 'bg-primary text-primary-foreground'
-                                    : 'bg-muted text-muted-foreground',
-                                )}
-                              >
-                                <Icon />
-                              </div>
-                              <div className="min-w-0 flex-1">
-                                <div className="mb-1 flex items-center justify-between gap-2">
-                                  <h4 className="truncate text-sm font-medium text-foreground">
-                                    {name}
-                                  </h4>
-                                  <Badge variant={badge.variant}>
-                                    {badge.label}
-                                  </Badge>
-                                </div>
-                                <p className="mb-1.5 truncate text-xs text-muted-foreground">
-                                  {call.patientPhone}
-                                </p>
-                                <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
-                                  <span className="flex items-center gap-1">
-                                    <Clock className="size-3" />
-                                    {formatDurationSec(call.durationSec)}
-                                  </span>
-                                  <span>{formatTime(call.startedAt)}</span>
-                                  <span className="text-border">|</span>
-                                  <span>{intentLabel(call.detectedIntent)}</span>
-                                </div>
-                              </div>
-                              {isSelected && (
-                                <ChevronRight className="size-4 shrink-0 text-primary" />
-                              )}
-                            </button>
-                          </li>
-                        );
-                      })}
-                    </ul>
+                    <div className="divide-y divide-border">
+                      {historyGroups.map(([dateKey, groupCalls]) => (
+                        <div key={dateKey}>
+                          <div className="sticky top-0 z-10 border-b border-border bg-card/95 px-6 py-2 backdrop-blur-sm">
+                            <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                              {formatDayLabel(groupCalls[0].startedAt)}
+                            </span>
+                          </div>
+                          <ul className="divide-y divide-border">
+                            {groupCalls.map((call) => {
+                              const Icon = intentIcon(call.detectedIntent);
+                              const badge = outcomeBadge(call.outcome);
+                              const isSelected =
+                                selectedCall?.id === call.id;
+                              const name =
+                                call.patient?.fullName ?? call.patientPhone;
+                              return (
+                                <li key={call.id} className="relative">
+                                  <button
+                                    type="button"
+                                    onClick={() => setSelectedCallId(call.id)}
+                                    className={cn(
+                                      'flex w-full items-center gap-4 px-6 py-4 text-left transition-colors',
+                                      isSelected
+                                        ? 'bg-primary-muted/50'
+                                        : 'hover:bg-muted/60',
+                                    )}
+                                  >
+                                    {isSelected && (
+                                      <span className="absolute inset-y-3 left-0 w-[3px] rounded-r-full bg-primary" />
+                                    )}
+                                    <div
+                                      className={cn(
+                                        'flex size-11 shrink-0 items-center justify-center rounded-full [&_svg]:size-5',
+                                        isSelected
+                                          ? 'bg-primary text-primary-foreground'
+                                          : 'bg-muted text-muted-foreground',
+                                      )}
+                                    >
+                                      <Icon />
+                                    </div>
+                                    <div className="min-w-0 flex-1">
+                                      <div className="mb-1 flex items-center justify-between gap-2">
+                                        <h4 className="truncate text-sm font-medium text-foreground">
+                                          {name}
+                                        </h4>
+                                        <Badge variant={badge.variant}>
+                                          {badge.label}
+                                        </Badge>
+                                      </div>
+                                      <p className="mb-1.5 truncate text-xs text-muted-foreground">
+                                        {call.patientPhone}
+                                      </p>
+                                      <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
+                                        <span className="flex items-center gap-1">
+                                          <Clock className="size-3" />
+                                          {formatDurationSec(call.durationSec)}
+                                        </span>
+                                        <span>{formatTime(call.startedAt)}</span>
+                                        <span className="text-border">|</span>
+                                        <span>
+                                          {intentLabel(call.detectedIntent)}
+                                        </span>
+                                      </div>
+                                    </div>
+                                    {isSelected && (
+                                      <ChevronRight className="size-4 shrink-0 text-primary" />
+                                    )}
+                                  </button>
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        </div>
+                      ))}
+                    </div>
                   </ScrollArea>
                 )}
               </div>
