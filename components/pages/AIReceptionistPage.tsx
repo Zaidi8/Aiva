@@ -126,8 +126,15 @@ function parseTranscript(raw: unknown): TranscriptSegment[] {
     .filter((s) => s && typeof s === 'object')
     .map((s) => {
       const obj = s as Record<string, unknown>;
+      // The voice runtime persists turns with role "user" | "assistant"
+      // ("ai" | "patient" appear on legacy/test rows). Normalize the AI side
+      // so assistant and system turns render left of the caller.
+      const role =
+        typeof obj.role === 'string' ? obj.role : 'ai';
+      const normalized =
+        role === 'user' || role === 'patient' ? 'user' : 'ai';
       return {
-        role: typeof obj.role === 'string' ? obj.role : 'ai',
+        role: normalized,
         text: typeof obj.text === 'string' ? obj.text : '',
         timestamp:
           typeof obj.timestamp === 'string' ? obj.timestamp : undefined,
