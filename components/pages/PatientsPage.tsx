@@ -34,6 +34,8 @@ interface PatientsPageProps {
   initialTotal: number;
   initialQuery?: string;
   onNavigate?: (page: string) => void;
+  // False for Doctor logins — read-only view (RBAC: patient:write).
+  canWrite?: boolean;
 }
 
 interface DateRange {
@@ -67,6 +69,7 @@ export function PatientsPage({
   initialPatients,
   initialTotal,
   initialQuery = '',
+  canWrite = true,
 }: PatientsPageProps) {
   const router = useRouter();
   // useTransition keeps router.refresh() non-blocking so the UI stays
@@ -158,10 +161,12 @@ export function PatientsPage({
         title="Patient Records"
         description="Manage patient information and medical history"
         actionButton={
-          <Button onClick={() => setIsAddPatientModalOpen(true)}>
-            <Plus />
-            Add patient
-          </Button>
+          canWrite ? (
+            <Button onClick={() => setIsAddPatientModalOpen(true)}>
+              <Plus />
+              Add patient
+            </Button>
+          ) : undefined
         }
       />
 
@@ -221,10 +226,12 @@ export function PatientsPage({
                   : 'Try adjusting your search query.'
               }
               action={
-                <Button onClick={() => setIsAddPatientModalOpen(true)}>
-                  <Plus />
-                  Add patient
-                </Button>
+                canWrite ? (
+                  <Button onClick={() => setIsAddPatientModalOpen(true)}>
+                    <Plus />
+                    Add patient
+                  </Button>
+                ) : undefined
               }
             />
           </SectionCard>
@@ -317,11 +324,13 @@ export function PatientsPage({
         totalPages={totalPages}
       />
 
-      <AddPatientModal
-        isOpen={isAddPatientModalOpen}
-        onClose={() => setIsAddPatientModalOpen(false)}
-        onCreated={refresh}
-      />
+      {canWrite && (
+        <AddPatientModal
+          isOpen={isAddPatientModalOpen}
+          onClose={() => setIsAddPatientModalOpen(false)}
+          onCreated={refresh}
+        />
+      )}
 
       {/* Patient Full Record Modal */}
       <PatientRecordModal

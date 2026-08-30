@@ -3,14 +3,18 @@
 // Empty array = doctor has no schedule, is deactivated, or every slot is taken.
 
 import type { NextRequest } from "next/server";
-import { withApiStaff } from "@/lib/api/with-staff";
+import { withApiCan } from "@/lib/api/with-staff";
 import { ok, failValidation } from "@/lib/api/response";
 import { computeAvailability } from "@/lib/appointments/queries";
 import { availabilityQuerySchema } from "@/lib/validations/appointment";
 
 export const runtime = "nodejs";
 
-export const GET = withApiStaff(async (req: NextRequest, _ctx, staff) => {
+export const GET = withApiCan(["appointment:read"])(async (
+  req: NextRequest,
+  _ctx,
+  staff,
+) => {
   const url = new URL(req.url);
   const parsed = availabilityQuerySchema.safeParse({
     doctorId: url.searchParams.get("doctorId"),

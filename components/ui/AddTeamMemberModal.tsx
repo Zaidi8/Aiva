@@ -22,6 +22,7 @@ import {
 } from './select';
 import { Copy, Check, KeyRound } from 'lucide-react';
 import { apiPost, ApiError } from '@/lib/client/fetcher';
+import { ROLE_KEYS } from '@/lib/rbac';
 import type { StaffRole } from '@prisma/client';
 
 interface AddTeamMemberModalProps {
@@ -47,11 +48,17 @@ const EMPTY: TeamFormValues = {
   phone: '',
 };
 
-const ROLES: { value: StaffRole; label: string; hint: string }[] = [
-  { value: 'Admin', label: 'Admin', hint: 'Full access, manages the team' },
-  { value: 'Receptionist', label: 'Receptionist', hint: 'Day-to-day scheduling' },
-  { value: 'Doctor', label: 'Doctor', hint: 'Clinical staff login' },
-];
+const ROLE_HINTS: Record<(typeof ROLE_KEYS)[number], string> = {
+  Admin: 'Full access, manages the team',
+  Receptionist: 'Day-to-day scheduling',
+  Doctor: 'Clinical staff login',
+};
+
+// Role select options derived from lib/rbac.ts so the dropdown can't drift
+// from the permission matrix.
+const ROLES: { value: StaffRole; label: string; hint: string }[] = ROLE_KEYS.map(
+  (key) => ({ value: key as StaffRole, label: key, hint: ROLE_HINTS[key] }),
+);
 
 interface Credentials {
   email: string;

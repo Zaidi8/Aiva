@@ -2,14 +2,18 @@
 // today's summary server-side (sequentially — the pooled DB is
 // connection_limit=1) and hands them to the client component as initial state.
 // While this runs, ai-receptionist/loading.tsx streams a layout-matched skeleton.
+// Visible to Admin + Receptionist (call logs are staff-operational data).
 
+import { redirect } from 'next/navigation';
 import { requireStaff } from '@/lib/auth';
+import { can } from '@/lib/rbac';
 import { listCalls } from '@/lib/calls/queries';
 import { getDashboardSummary } from '@/lib/dashboard/queries';
 import { AIReceptionistPage } from '@/components/pages/AIReceptionistPage';
 
 export default async function AIReceptionistRoute() {
   const staff = await requireStaff();
+  if (!can(staff.role, 'call:read')) redirect('/dashboard');
   const calls = await listCalls(staff, { take: 50 });
   const summary = await getDashboardSummary(staff);
 

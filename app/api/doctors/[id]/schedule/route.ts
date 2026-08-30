@@ -7,7 +7,7 @@
 // voice agent read. PUT semantics are replace-all (see replaceDoctorSchedule).
 
 import type { NextRequest } from "next/server";
-import { withApiStaff } from "@/lib/api/with-staff";
+import { withApiCan } from "@/lib/api/with-staff";
 import { ok, failNotFound, failValidation } from "@/lib/api/response";
 import { mapPrismaError } from "@/lib/api/prisma-errors";
 import {
@@ -20,14 +20,18 @@ type Ctx = { params: Promise<{ id: string }> };
 
 export const runtime = "nodejs";
 
-export const GET = withApiStaff<Ctx>(async (_req, { params }, staff) => {
+export const GET = withApiCan<Ctx>(["doctor:read"])(async (
+  _req,
+  { params },
+  staff,
+) => {
   const { id } = await params;
   const days = await getDoctorSchedule(staff, id);
   if (days === null) return failNotFound("Doctor");
   return ok({ days });
 });
 
-export const PUT = withApiStaff<Ctx>(
+export const PUT = withApiCan<Ctx>(["doctor:write"])(
   async (req: NextRequest, { params }, staff) => {
     const { id } = await params;
     const body = await req.json().catch(() => null);

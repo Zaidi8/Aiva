@@ -21,7 +21,7 @@ export class NotAuthorizedError extends Error {
 }
 
 export type StaffWithClinic = Prisma.ClinicStaffGetPayload<{
-  include: { clinic: true };
+  include: { clinic: true; linkedDoctor: true };
 }>;
 
 export async function getCurrentUser() {
@@ -35,14 +35,63 @@ export async function getCurrentUser() {
 // Returns the logged-in staff (with clinic), or null if there is no session
 // OR the staff row has been soft-deleted. Soft-deleted staff are treated as
 // logged out — they should not be able to load any dashboard data.
+// Doctor-role logins are tied to the Doctor row whose email matches their own
+// within the SAME clinic. We auto-link on first fetch (when linkedDoctor is
+// null) so a staff login created for an existing doctor row immediately sees
+// their own appointments/patients without any manual step.
+async function ensureDoctorLink(
+  staff: Prisma.ClinicStaffGetPayload<{
+    include: { clinic: true; linkedDoctor: true };
+  }>
+): Promise<StaffWithClinic | null> {
+  // Only Doctor logins are scoped, and only need linking when not yet linked
+  // or the link's already resolved. Skip everything else.
+  if (
+    staff.role !== "Doctor" ||
+    staff.linkedDoctor !== null ||
+    !staff.email
+  ) {
+    return staff as StaffWithClinic;
+  }
+
+  // Match against the doctor row in the same clinic with the same email. Only
+  // claim rows not already linked to another staff login (clinicStaffId unique).
+  const match = await prisma.doctor.findFirst({
+    where: {
+      clinicId: staff.clinicId,
+      email: staff.email,
+      deactivatedAt: null,
+      clinicStaffId: null,
+    },
+    select: { id: true },
+  });
+  if (!match) return staff as StaffWithClinic;
+
+  // The FK lives on Doctor.clinicStaffId (SetNull on staff delete). Set it so
+  // the staff's `linkedDoctor` relation — and therefore doctorScope() — resolves.
+  await prisma.doctor.update({
+    where: { id: match.id },
+    data: { clinicStaffId: staff.id },
+  });
+
+  const relinked = await prisma.clinicStaff.findFirst({
+    where: { id: staff.id },
+    include: { clinic: true, linkedDoctor: true },
+  });
+  return relinked as StaffWithClinic;
+}
+
 export async function getCurrentStaff(): Promise<StaffWithClinic | null> {
   const user = await getCurrentUser();
   if (!user) return null;
 
-  return prisma.clinicStaff.findFirst({
+  const staff = await prisma.clinicStaff.findFirst({
     where: { authUserId: user.id, deactivatedAt: null },
-    include: { clinic: true },
+    include: { clinic: true, linkedDoctor: true },
   });
+  if (!staff) return null;
+
+  return ensureDoctorLink(staff);
 }
 
 // Server Component / Server Action variant: redirect to /auth on missing session.

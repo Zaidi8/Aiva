@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import type { PageType } from "@/types";
+import { can, type Permission } from "@/lib/rbac";
 import { AivaLogo } from "../ui/AivaLogo";
 import {
   DropdownMenu,
@@ -52,20 +53,30 @@ interface SidebarProps {
 // flips correctly in `next build` vs `next dev`.
 const isDev = process.env.NODE_ENV !== "production";
 
-const mainMenuItems = [
-  { id: "dashboard" as PageType, label: "Dashboard", icon: LayoutDashboard },
-  { id: "appointments" as PageType, label: "Appointments", icon: Calendar },
-  { id: "patients" as PageType, label: "Patient Records", icon: Users },
-  { id: "doctors" as PageType, label: "Doctors", icon: Stethoscope },
-  { id: "team" as PageType, label: "Team", icon: UsersRound },
-  { id: "ai-receptionist" as PageType, label: "AI Receptionist", icon: Phone },
-  { id: "analytics" as PageType, label: "Analytics", icon: BarChart3 },
+const mainMenuItems: {
+  id: PageType;
+  label: string;
+  icon: typeof LayoutDashboard;
+  perm: Permission;
+}[] = [
+  { id: "dashboard", label: "Dashboard", icon: LayoutDashboard, perm: "dashboard:view" },
+  { id: "appointments", label: "Appointments", icon: Calendar, perm: "appointment:read" },
+  { id: "patients", label: "Patient Records", icon: Users, perm: "patient:read" },
+  { id: "doctors", label: "Doctors", icon: Stethoscope, perm: "doctor:read" },
+  { id: "team", label: "Team", icon: UsersRound, perm: "team:manage" },
+  { id: "ai-receptionist", label: "AI Receptionist", icon: Phone, perm: "call:read" },
+  { id: "analytics", label: "Analytics", icon: BarChart3, perm: "analytics:read" },
   // UI Kit is a developer-facing showcase; hidden from real users in production
   // builds. The route stays — visit /ui-kit directly to reach it.
   ...(isDev
-    ? [{ id: "ui-kit" as PageType, label: "UI Kit", icon: Palette }]
+    ? [{ id: "ui-kit" as PageType, label: "UI Kit", icon: Palette, perm: "dashboard:view" as Permission }]
     : []),
 ];
+
+// Nav items the current role may see. Filtering keeps a single source of
+// truth (lib/rbac.ts) instead of role strings sprinkled through this file.
+const visibleMenuItems = (role: string) =>
+  mainMenuItems.filter((item) => can(role, item.perm));
 
 function initials(name: string) {
   return name
@@ -148,7 +159,7 @@ export function NewSidebar({ currentPage, userProfile }: SidebarProps) {
             </p>
           )}
           <ul className="space-y-1">
-            {mainMenuItems.map((item) => {
+            {visibleMenuItems(userProfile.role).map((item) => {
               const Icon = item.icon;
               const isActive = currentPage === item.id;
               return (

@@ -8,7 +8,7 @@
 
 import type { NextRequest } from "next/server";
 
-import { withApiStaff } from "@/lib/api/with-staff";
+import { withApiCan } from "@/lib/api/with-staff";
 import {
   ok,
   created,
@@ -18,11 +18,21 @@ import { mapPrismaError } from "@/lib/api/prisma-errors";
 import { listPatients } from "@/lib/patients/queries";
 import { createPatient } from "@/lib/patients/mutations";
 import { createPatientSchema } from "@/lib/validations/patient";
+import { doctorScope } from "@/lib/role-scope";
 
 // Prisma requires the Node.js runtime.
 export const runtime = "nodejs";
 
-export const GET = withApiStaff(async (req: NextRequest, _ctx, staff) => {
+export const GET = withApiCan(["patient:read"])(async (
+  req: NextRequest,
+  _ctx,
+  staff,
+) => {
+  const scope = doctorScope(staff);
+  const scopeDoctorId = scope.limited ? scope.doctorId ?? undefined : undefined;
+  if (scope.limited && !scopeDoctorId) {
+    return ok({ items: [], total: 0 });
+  }
   const { searchParams } = new URL(req.url);
 
   const q = searchParams.get("q") ?? undefined;
@@ -36,11 +46,20 @@ export const GET = withApiStaff(async (req: NextRequest, _ctx, staff) => {
   const take = Number.isFinite(takeParsed) ? takeParsed : 50;
   const skip = Number.isFinite(skipParsed) ? skipParsed : 0;
 
-  const { items, total } = await listPatients(staff, { q, take, skip });
+  const { items, total } = await listPatients(staff, {
+    q,
+    take,
+    skip,
+    doctorId: scopeDoctorId,
+  });
   return ok({ items, total });
 });
 
-export const POST = withApiStaff(async (req: NextRequest, _ctx, staff) => {
+export const POST = withApiCan(["patient:write"])(async (
+  req: NextRequest,
+  _ctx,
+  staff,
+) => {
   const body = await req.json().catch(() => null);
   const parsed = createPatientSchema.safeParse(body);
   if (!parsed.success) return failValidation(parsed.error);

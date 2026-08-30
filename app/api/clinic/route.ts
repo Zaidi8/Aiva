@@ -8,7 +8,7 @@
 
 import type { NextRequest } from "next/server";
 
-import { withApiStaff } from "@/lib/api/with-staff";
+import { withApiCan } from "@/lib/api/with-staff";
 import {
   ok,
   failNotFound,
@@ -22,13 +22,21 @@ import { updateClinicSchema } from "@/lib/validations/clinic";
 
 export const runtime = "nodejs";
 
-export const GET = withApiStaff(async (_req: NextRequest, _ctx, staff) => {
+export const GET = withApiCan(["dashboard:view"])(async (
+  _req: NextRequest,
+  _ctx,
+  staff,
+) => {
   const clinic = await getClinic(staff);
   if (!clinic) return failNotFound("Clinic");
   return ok(clinic);
 });
 
-export const PATCH = withApiStaff(async (req: NextRequest, _ctx, staff) => {
+export const PATCH = withApiCan(["clinic:write"])(async (
+  req: NextRequest,
+  _ctx,
+  staff,
+) => {
   const body = await req.json().catch(() => null);
   const parsed = updateClinicSchema.safeParse(body);
   if (!parsed.success) return failValidation(parsed.error);

@@ -12,7 +12,9 @@
 // stays inside the PatientsPage client component, which is 'use client'.
 
 import { requireStaff } from '@/lib/auth';
+import { can } from '@/lib/rbac';
 import { listPatients } from '@/lib/patients/queries';
+import { doctorScope } from '@/lib/role-scope';
 import { PatientsPage } from '@/components/pages/PatientsPage';
 
 // Next.js 15+ provides searchParams as a Promise.
@@ -26,9 +28,19 @@ export default async function PatientsRoute({
   const staff = await requireStaff();
   const { q } = await searchParams;
   const trimmedQuery = q?.trim() ?? '';
+  const scope = doctorScope(staff);
+  const scopeDoctorId = scope.limited ? scope.doctorId ?? undefined : undefined;
+  const canWrite = can(staff.role, 'patient:write');
+
+  // Doctor logins only see patients they've treated (linked via their own
+  // appointments). A Doctor with no linked row sees an empty list.
+  if (scope.limited && !scopeDoctorId) {
+    return <PatientsPage initialPatients={[]} initialTotal={0} initialQuery={trimmedQuery} canWrite={canWrite} />;
+  }
 
   const { items, total } = await listPatients(staff, {
     q: trimmedQuery || undefined,
+    doctorId: scopeDoctorId,
   });
 
   return (
@@ -36,6 +48,7 @@ export default async function PatientsRoute({
       initialPatients={items}
       initialTotal={total}
       initialQuery={trimmedQuery}
+      canWrite={canWrite}
     />
   );
 }

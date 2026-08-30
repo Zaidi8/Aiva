@@ -9,7 +9,7 @@
 
 import type { NextRequest } from "next/server";
 
-import { withApiStaff } from "@/lib/api/with-staff";
+import { withApiCan } from "@/lib/api/with-staff";
 import {
   ok,
   noContent,
@@ -23,6 +23,7 @@ import {
   deletePatient,
 } from "@/lib/patients/mutations";
 import { updatePatientSchema } from "@/lib/validations/patient";
+import { doctorScope } from "@/lib/role-scope";
 
 // Prisma requires the Node.js runtime.
 export const runtime = "nodejs";
@@ -30,14 +31,24 @@ export const runtime = "nodejs";
 // Next.js 15+: dynamic params arrive as a Promise.
 type Ctx = { params: Promise<{ id: string }> };
 
-export const GET = withApiStaff<Ctx>(async (_req, ctx, staff) => {
+export const GET = withApiCan<Ctx>(["patient:read"])(async (
+  _req,
+  ctx,
+  staff,
+) => {
   const { id } = await ctx.params;
-  const patient = await getPatient(staff, id);
+  const scope = doctorScope(staff);
+  const scopeDoctorId = scope.limited ? scope.doctorId ?? undefined : undefined;
+  const patient = await getPatient(staff, id, scopeDoctorId);
   if (!patient) return failNotFound("Patient");
   return ok(patient);
 });
 
-export const PATCH = withApiStaff<Ctx>(async (req: NextRequest, ctx, staff) => {
+export const PATCH = withApiCan<Ctx>(["patient:write"])(async (
+  req: NextRequest,
+  ctx,
+  staff,
+) => {
   const { id } = await ctx.params;
 
   const body = await req.json().catch(() => null);
@@ -55,7 +66,11 @@ export const PATCH = withApiStaff<Ctx>(async (req: NextRequest, ctx, staff) => {
   }
 });
 
-export const DELETE = withApiStaff<Ctx>(async (_req, ctx, staff) => {
+export const DELETE = withApiCan<Ctx>(["patient:write"])(async (
+  _req,
+  ctx,
+  staff,
+) => {
   const { id } = await ctx.params;
   const removed = await deletePatient(staff, id);
   if (!removed) return failNotFound("Patient");

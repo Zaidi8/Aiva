@@ -8,7 +8,7 @@
 
 import type { NextRequest } from "next/server";
 
-import { withApiStaff } from "@/lib/api/with-staff";
+import { withApiCan } from "@/lib/api/with-staff";
 import { ok, failNotFound } from "@/lib/api/response";
 import { getCall } from "@/lib/calls/queries";
 
@@ -16,7 +16,11 @@ export const runtime = "nodejs";
 
 type Ctx = { params: Promise<{ id: string }> };
 
-export const GET = withApiStaff<Ctx>(async (_req: NextRequest, ctx, staff) => {
+export const GET = withApiCan<Ctx>(["call:read"])(async (
+  _req: NextRequest,
+  ctx,
+  staff,
+) => {
   const { id } = await ctx.params;
   const call = await getCall(staff, id);
   if (!call) return failNotFound("Call");

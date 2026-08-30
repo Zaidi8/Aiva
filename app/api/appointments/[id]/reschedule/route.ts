@@ -1,7 +1,7 @@
 // POST /api/appointments/[id]/reschedule  → re-checks the slot-uniqueness
 // constraint via the DB. P2002 → 409 SLOT_TAKEN.
 
-import { withApiStaff } from "@/lib/api/with-staff";
+import { withApiCan } from "@/lib/api/with-staff";
 import {
   ok,
   failNotFound,
@@ -15,7 +15,11 @@ type Ctx = { params: Promise<{ id: string }> };
 
 export const runtime = "nodejs";
 
-export const POST = withApiStaff<Ctx>(async (req, { params }, staff) => {
+export const POST = withApiCan<Ctx>(["appointment:write"])(async (
+  req,
+  { params },
+  staff,
+) => {
   const { id } = await params;
   const body = await req.json().catch(() => null);
   const parsed = rescheduleAppointmentSchema.safeParse(body);

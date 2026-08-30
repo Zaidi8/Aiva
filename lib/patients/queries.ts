@@ -24,6 +24,9 @@ export interface ListPatientsOptions {
   // Pagination — defaults: take 50, skip 0.
   take?: number;
   skip?: number;
+  // Restrict to patients who have at least one appointment with this doctor
+  // (used for Doctor-role data scoping — see lib/role-scope.ts).
+  doctorId?: string;
 }
 
 // Returns a page of patients in the caller's clinic plus the total count for
@@ -33,11 +36,14 @@ export async function listPatients(
   staff: ScopedStaff,
   opts: ListPatientsOptions = {},
 ) {
-  const { q, take = 50, skip = 0 } = opts;
+  const { q, take = 50, skip = 0, doctorId } = opts;
 
   const trimmed = q?.trim();
   const where = {
     ...clinicWhere(staff),
+    ...(doctorId
+      ? { appointments: { some: { doctorId, clinicId: staff.clinicId } } }
+      : {}),
     ...(trimmed
       ? {
           OR: [
@@ -64,9 +70,20 @@ export async function listPatients(
 // Single-row lookup scoped to the caller's clinic. Returns null if the
 // patient doesn't exist OR belongs to a different clinic — callers cannot
 // distinguish the two cases, which is the correct behavior (don't leak the
-// existence of cross-tenant rows via 404 vs 403).
-export async function getPatient(staff: ScopedStaff, id: string) {
+// existence of cross-tenant rows via 404 vs 403). Pass `doctorId` to further
+// restrict to a patient that doctor has seen (Doctor-role scoping).
+export async function getPatient(
+  staff: ScopedStaff,
+  id: string,
+  doctorId?: string,
+) {
   return prisma.patient.findFirst({
-    where: { id, ...clinicWhere(staff) },
+    where: {
+      id,
+      ...clinicWhere(staff),
+      ...(doctorId
+        ? { appointments: { some: { doctorId, clinicId: staff.clinicId } } }
+        : {}),
+    },
   });
 }

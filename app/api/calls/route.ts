@@ -13,13 +13,17 @@
 
 import type { NextRequest } from "next/server";
 
-import { withApiStaff } from "@/lib/api/with-staff";
+import { withApiCan } from "@/lib/api/with-staff";
 import { ok } from "@/lib/api/response";
 import { listCalls } from "@/lib/calls/queries";
 
 export const runtime = "nodejs";
 
-export const GET = withApiStaff(async (req: NextRequest, _ctx, staff) => {
+export const GET = withApiCan(["call:read"])(async (
+  req: NextRequest,
+  _ctx,
+  staff,
+) => {
   const url = new URL(req.url);
   const from = url.searchParams.get("from");
   const to = url.searchParams.get("to");

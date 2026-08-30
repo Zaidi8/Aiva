@@ -24,6 +24,7 @@ import {
   requireApiRole,
   type StaffWithClinic,
 } from "@/lib/auth";
+import { can, type Permission } from "@/lib/rbac";
 
 type Handler<Ctx> = (
   req: NextRequest,
@@ -44,6 +45,21 @@ export function withApiRole<Ctx = unknown>(roles: StaffRole[]) {
     async (req: NextRequest, ctx: Ctx): Promise<Response> => {
       const result = await requireApiRole(req, roles);
       if (result instanceof Response) return result;
+      return handler(req, ctx, result);
+    };
+}
+
+// Permission-based variant: 401 if no session, 403 if the staff's role holds
+// none of the required permissions. Keep the matrix in lib/rbac.ts in sync
+// with the role arrays used in withApiRole.
+export function withApiCan<Ctx = unknown>(permissions: Permission[]) {
+  return (handler: Handler<Ctx>) =>
+    async (req: NextRequest, ctx: Ctx): Promise<Response> => {
+      const result = await requireApiStaff(req);
+      if (result instanceof Response) return result;
+      if (!can(result.role, permissions)) {
+        return Response.json({ error: "Forbidden" }, { status: 403 });
+      }
       return handler(req, ctx, result);
     };
 }

@@ -4,8 +4,7 @@
 // onDelete: Restrict. To revive a doctor, PATCH with {} after a re-activate
 // helper, or call POST /api/doctors/[id]/reactivate (future).
 
-import type { NextRequest } from "next/server";
-import { withApiStaff } from "@/lib/api/with-staff";
+import { withApiCan } from "@/lib/api/with-staff";
 import {
   ok,
   noContent,
@@ -21,14 +20,22 @@ type Ctx = { params: Promise<{ id: string }> };
 
 export const runtime = "nodejs";
 
-export const GET = withApiStaff<Ctx>(async (_req, { params }, staff) => {
+export const GET = withApiCan<Ctx>(["doctor:read"])(async (
+  _req,
+  { params },
+  staff,
+) => {
   const { id } = await params;
   const doctor = await getDoctor(staff, id);
   if (!doctor) return failNotFound("Doctor");
   return ok(doctor);
 });
 
-export const PATCH = withApiStaff<Ctx>(async (req, { params }, staff) => {
+export const PATCH = withApiCan<Ctx>(["doctor:write"])(async (
+  req,
+  { params },
+  staff,
+) => {
   const { id } = await params;
   const body = await req.json().catch(() => null);
   const parsed = updateDoctorSchema.safeParse(body);
@@ -44,7 +51,11 @@ export const PATCH = withApiStaff<Ctx>(async (req, { params }, staff) => {
   }
 });
 
-export const DELETE = withApiStaff<Ctx>(async (_req, { params }, staff) => {
+export const DELETE = withApiCan<Ctx>(["doctor:write"])(async (
+  _req,
+  { params },
+  staff,
+) => {
   const { id } = await params;
   const found = await deactivateDoctor(staff, id);
   if (!found) return failNotFound("Doctor");

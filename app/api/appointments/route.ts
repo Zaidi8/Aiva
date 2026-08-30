@@ -2,7 +2,7 @@
 
 import type { NextRequest } from "next/server";
 import type { AppointmentStatus } from "@prisma/client";
-import { withApiStaff } from "@/lib/api/with-staff";
+import { withApiCan } from "@/lib/api/with-staff";
 import {
   ok,
   created,
@@ -16,19 +16,32 @@ import {
   AppointmentFkError,
 } from "@/lib/appointments/mutations";
 import { createAppointmentSchema } from "@/lib/validations/appointment";
+import { doctorScope } from "@/lib/role-scope";
 
 export const runtime = "nodejs";
 
-export const GET = withApiStaff(async (req: NextRequest, _ctx, staff) => {
+export const GET = withApiCan(["appointment:read"])(async (
+  req: NextRequest,
+  _ctx,
+  staff,
+) => {
+  const scope = doctorScope(staff);
+  const scopeDoctorId = scope.limited ? scope.doctorId ?? undefined : undefined;
+  if (scope.limited && !scopeDoctorId) {
+    return ok({ items: [], total: 0 });
+  }
   const url = new URL(req.url);
   const from = url.searchParams.get("from");
   const to = url.searchParams.get("to");
   const status = url.searchParams.getAll("status") as AppointmentStatus[];
+  const requestedDoctorId = url.searchParams.get("doctorId") ?? undefined;
   const result = await listAppointments(staff, {
     from: from ? new Date(from) : undefined,
     to: to ? new Date(to) : undefined,
     status: status.length ? status : undefined,
-    doctorId: url.searchParams.get("doctorId") ?? undefined,
+    // Doctor logins are pinned to their own doctor; they may not filter to
+    // someone else's schedule.
+    doctorId: scope.limited ? scopeDoctorId : requestedDoctorId,
     patientId: url.searchParams.get("patientId") ?? undefined,
     take: Number(url.searchParams.get("take") ?? "100"),
     skip: Number(url.searchParams.get("skip") ?? "0"),
@@ -36,7 +49,11 @@ export const GET = withApiStaff(async (req: NextRequest, _ctx, staff) => {
   return ok(result);
 });
 
-export const POST = withApiStaff(async (req: NextRequest, _ctx, staff) => {
+export const POST = withApiCan(["appointment:write"])(async (
+  req: NextRequest,
+  _ctx,
+  staff,
+) => {
   const body = await req.json().catch(() => null);
   const parsed = createAppointmentSchema.safeParse(body);
   if (!parsed.success) return failValidation(parsed.error);

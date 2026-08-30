@@ -56,6 +56,8 @@ interface AppointmentsPageProps {
   initialAppointments: AppointmentRow[];
   initialTotals: { total: number; confirmed: number; pending: number };
   onNavigate?: (page: string) => void;
+  // False for Doctor logins — read-only schedule view (RBAC: appointment:write).
+  canWrite?: boolean;
 }
 
 function formatTime(iso: string): string {
@@ -113,6 +115,7 @@ const calendarClassNames = {
 export function AppointmentsPage({
   initialAppointments,
   initialTotals,
+  canWrite = true,
 }: AppointmentsPageProps) {
   const router = useRouter();
   const [, startTransition] = useTransition();
@@ -210,10 +213,12 @@ export function AppointmentsPage({
       <TopBar
         title="Appointments"
         actionButton={
-          <Button onClick={() => setIsNewAppointmentModalOpen(true)}>
-            <Plus />
-            New appointment
-          </Button>
+          canWrite ? (
+            <Button onClick={() => setIsNewAppointmentModalOpen(true)}>
+              <Plus />
+              New appointment
+            </Button>
+          ) : undefined
         }
       />
 
@@ -318,10 +323,12 @@ export function AppointmentsPage({
                   : 'Try adjusting your search or status filter.'
               }
               action={
-                <Button onClick={() => setIsNewAppointmentModalOpen(true)}>
-                  <Plus />
-                  Add appointment
-                </Button>
+                canWrite ? (
+                  <Button onClick={() => setIsNewAppointmentModalOpen(true)}>
+                    <Plus />
+                    Add appointment
+                  </Button>
+                ) : undefined
               }
             />
           </SectionCard>
@@ -399,11 +406,13 @@ export function AppointmentsPage({
         </div>
       )}
 
-      <NewAppointmentModal
-        isOpen={isNewAppointmentModalOpen}
-        onClose={() => setIsNewAppointmentModalOpen(false)}
-        onCreated={refresh}
-      />
+      {canWrite && (
+        <NewAppointmentModal
+          isOpen={isNewAppointmentModalOpen}
+          onClose={() => setIsNewAppointmentModalOpen(false)}
+          onCreated={refresh}
+        />
+      )}
     </div>
   );
 }

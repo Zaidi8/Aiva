@@ -18,6 +18,7 @@ import {
 import { TopBar } from '../ui/TopBar';
 import { AddTeamMemberModal } from '../ui/AddTeamMemberModal';
 import { apiPatch, apiDelete, ApiError } from '@/lib/client/fetcher';
+import { ROLE_KEYS } from '@/lib/rbac';
 import type { StaffRole } from '@prisma/client';
 
 interface StaffMember {
@@ -35,7 +36,7 @@ interface TeamPageProps {
   isAdmin: boolean;
 }
 
-const ROLES: StaffRole[] = ['Admin', 'Receptionist', 'Doctor'];
+const ROLES: StaffRole[] = ROLE_KEYS as StaffRole[];
 
 // Map each role to a soft, tinted badge variant (the enterprise standard for
 // categorical labels) rather than ad-hoc hex tints.
