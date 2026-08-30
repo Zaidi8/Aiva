@@ -24,6 +24,15 @@ import time
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
+
+def _utc_iso_z() -> str:
+    """Current UTC time as an ISO string ending in 'Z'.
+
+    The backend zod schemas use `z.string().datetime()`, which REJECTS the
+    Python-default '+00:00' offset (returns 400 → the CallLog write silently
+    fails while the call still proceeds). A trailing 'Z' passes validation."""
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
 from typing import AsyncIterable
 
 from dotenv import load_dotenv
@@ -245,7 +254,7 @@ class CallLogger:
             to=dialed or "unknown",
             caller_phone=caller_phone or "unknown",
             clinic_id=clinic_id,
-            started_at=datetime.now(timezone.utc).isoformat(),
+            started_at=_utc_iso_z(),
         )
 
     async def record_user_turn(self, text: str) -> None:
@@ -289,7 +298,7 @@ class CallLogger:
         await end_call(
             client=self._client,
             provider_call_id=self._provider_call_id,
-            ended_at=datetime.now(timezone.utc).isoformat(),
+            ended_at=_utc_iso_z(),
             duration_sec=duration,
             outcome=outcome,
             detected_intent="Booking" if self._appointment_id else "Inquiry",
