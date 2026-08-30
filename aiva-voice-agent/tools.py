@@ -65,6 +65,19 @@ class ToolConfig:
     backend_url: str
     clinic_id: str
     webhook_secret: str
+    on_booking: Any | None = None
+    """Optional callback (appointment_id, patient_id) fired after a booking
+    succeeds, so the call logger can link the resulting appointment/patient to the
+    CallLog row. Called synchronously; fail-soft, exceptions are swallowed."""
+
+
+def _notify_booking(config: ToolConfig, appointment_id: str | None, patient_id: str | None) -> None:
+    if config.on_booking is None:
+        return
+    try:
+        config.on_booking(appointment_id, patient_id)
+    except Exception as exc:  # noqa: BLE001 — never let linkage break a booking
+        logger.warning("booking linkage callback failed: %s", exc)
 
 
 async def _get(config: ToolConfig, path: str, params: dict[str, str]) -> dict[str, Any] | None:
@@ -268,6 +281,8 @@ def build_tools(config: ToolConfig) -> list:
             who = appt.get("doctor", doctor_name)
             when_d = appt.get("date", date)
             when_t = appt.get("time", time)
+            # Link the call log to the created/existing appointment + patient.
+            _notify_booking(config, data.get("appointmentId"), data.get("patientId"))
             if data.get("idempotent"):
                 return f"That's already booked — {who} on {when_d} at {when_t}."
             return f"Booked. You're set with {who} on {when_d} at {when_t}."

@@ -17,9 +17,11 @@ Run with:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
-from datetime import datetime
+import time
+from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 from typing import AsyncIterable
@@ -40,6 +42,12 @@ from livekit.agents.llm import ChatChunk, ChatContext, FallbackAdapter
 from livekit.plugins import elevenlabs, groq, silero
 from livekit.plugins.turn_detector.english import EnglishModel
 
+from call_logs import (
+    _AsyncRateLimitedClient,
+    append_turn,
+    end_call,
+    start_call,
+)
 from clinic_context import (
     FALLBACK_GREETING,
     FALLBACK_SYSTEM_PROMPT,
@@ -186,6 +194,136 @@ async def _load_context_with_retry(
     raise last_exc
 
 
+class CallLogger:
+    """Persists one voice call's lifecycle to the Next.js CallLog table.
+
+    Wires the LiveKit session events (transcripts + close) into fire-and-forget
+    POSTs to the backend. All writes are best-effort: an unrecoverable backend
+    error is logged, never allowed to drop the live call. The `seq` counter,
+    combined with the provider call id in the eventId, keeps transcript chunks
+    idempotent and ordered.
+    """
+
+    def __init__(self, *, client: _AsyncRateLimitedClient, provider_call_id: str) -> None:
+        self._client = client
+        self._provider_call_id = provider_call_id
+        self._seq = 0
+        self._started_monotonic = time.monotonic()
+        self._appointment_id: str | None = None
+        self._patient_id: str | None = None
+        self._tasks: set[asyncio.Task] = set()
+
+    def _spawn(self, coro: Any) -> None:
+        """Schedule a fire-and-forget DB write, keeping a reference so the task
+        isn't garbage-collected mid-flight. Failures are logged, never raised."""
+        task = asyncio.create_task(coro)
+
+        def _done(t: asyncio.Task) -> None:
+            self._tasks.discard(t)
+            if not t.cancelled():
+                exc = t.exception()
+                if exc is not None:
+                    logger.warning("call-log write failed (non-fatal): %s", exc)
+
+        task.add_done_callback(_done)
+        self._tasks.add(task)
+
+    @property
+    def appointment_id(self) -> str | None:
+        return self._appointment_id
+
+    @property
+    def patient_id(self) -> str | None:
+        return self._patient_id
+
+    async def record_start(self, *, clinic_id: str, caller_phone: str, dialed: str) -> None:
+        """Register the call. Provider call id is reused across turns + end."""
+        await start_call(
+            client=self._client,
+            event_id=f"{self._provider_call_id}.start",
+            provider_call_id=self._provider_call_id,
+            to=dialed or "unknown",
+            caller_phone=caller_phone or "unknown",
+            clinic_id=clinic_id,
+            started_at=datetime.now(timezone.utc).isoformat(),
+        )
+
+    async def record_user_turn(self, text: str) -> None:
+        """Record the caller's final transcribed utterance."""
+        text = (text or "").strip()
+        if not text:
+            return
+        self._seq += 1
+        await append_turn(
+            client=self._client,
+            provider_call_id=self._provider_call_id,
+            role="user",
+            text=text,
+            seq=self._seq,
+        )
+
+    async def record_assistant_turn(self, text: str) -> None:
+        """Record the agent's spoken reply."""
+        text = (text or "").strip()
+        if not text:
+            return
+        self._seq += 1
+        await append_turn(
+            client=self._client,
+            provider_call_id=self._provider_call_id,
+            role="assistant",
+            text=text,
+            seq=self._seq,
+        )
+
+    def note_booking(self, appointment_id: str | None, patient_id: str | None) -> None:
+        """Stash the booked-appointment ids so call-ended can link them."""
+        if appointment_id:
+            self._appointment_id = appointment_id
+        if patient_id:
+            self._patient_id = patient_id
+
+    async def record_end(self, *, outcome: str = "Completed") -> None:
+        """Finalize the call. Duration is computed from wall-clock elapsed time."""
+        duration = max(0, int(time.monotonic() - self._started_monotonic))
+        await end_call(
+            client=self._client,
+            provider_call_id=self._provider_call_id,
+            endedAt=datetime.now(timezone.utc).isoformat(),
+            duration_sec=duration,
+            outcome=outcome,
+            detected_intent="Booking" if self._appointment_id else "Inquiry",
+            patient_id=self._patient_id,
+            appointment_id=self._appointment_id,
+        )
+
+
+def _extract_sip_call_info(ctx: JobContext) -> tuple[str, str, str]:
+    """Pull (provider_call_id, caller_phone, dialed) from the SIP participant.
+
+    For LiveKit SIP inbound calls the caller exposes attributes `sip.callID`,
+    `sip.phoneNumber` (caller) and `sip.trunkPhoneNumber` (dialed-in number).
+    Falls back defensively so both local `dev` console calls and non-SIP rooms
+    still register a call row.
+    """
+    provider_call_id = None
+    caller_phone = None
+    dialed = None
+    try:
+        for participant in ctx.room.remote_participants.values():
+            if participant.kind == rtc.ParticipantKind.PARTICIPANT_KIND_SIP:
+                attrs = participant.attributes or {}
+                provider_call_id = attrs.get("sip.callID")
+                caller_phone = attrs.get("sip.phoneNumber")
+                dialed = attrs.get("sip.trunkPhoneNumber")
+                break
+    except Exception:  # noqa: BLE001 — never let introspection break the call
+        logger.warning("Failed to inspect SIP participant attributes", exc_info=True)
+
+    provider_call_id = provider_call_id or ctx.room.name
+    return provider_call_id, caller_phone or "", dialed or ""
+
+
 async def entrypoint(ctx: JobContext) -> None:
     _require_env("GROQ_API_KEY")
     _require_env("ELEVENLABS_API_KEY")
@@ -195,6 +333,25 @@ async def entrypoint(ctx: JobContext) -> None:
 
     logger.info("Connecting to room %s ...", ctx.room.name)
     await ctx.connect()
+
+    # Register the call in the DB (best-effort) and capture the LiveKit SIP
+    # caller identity so transcripts persist under one stable providerCallId.
+    provider_call_id, caller_phone, dialed = _extract_sip_call_info(ctx)
+    call_logger = CallLogger(
+        client=_AsyncRateLimitedClient(
+            backend_url=backend_url,
+            secret=webhook_secret,
+        ),
+        provider_call_id=provider_call_id,
+    )
+    try:
+        await call_logger.record_start(
+            clinic_id=clinic_id,
+            caller_phone=caller_phone,
+            dialed=dialed,
+        )
+    except Exception:  # noqa: BLE001 — call logging must never drop the call
+        logger.warning("Failed to register call start (non-fatal)", exc_info=True)
 
     # Fetch the clinic context (with one retry), served from the per-worker cache
     # when fresh (Phase 8, CONTEXT_CACHE_TTL_S) to keep the Mumbai round-trip off
@@ -296,12 +453,15 @@ async def entrypoint(ctx: JobContext) -> None:
         preemptive_generation=False,
     )
 
-    # Phase 3: read-only LLM tools, bound to this clinic's backend config.
+    # Phase 3: read-only LLM tools, bound to this clinic's backend config. The
+    # on_booking hook lets book_appointment link the resulting appointment +
+    # patient back to this call's CallLog row.
     tools = build_tools(
         ToolConfig(
             backend_url=backend_url,
             clinic_id=clinic_id,
             webhook_secret=webhook_secret,
+            on_booking=call_logger.note_booking,
         )
     )
     logger.info("Loaded %d read-only tools: %s", len(tools), [t.info.name for t in tools])
@@ -310,6 +470,36 @@ async def entrypoint(ctx: JobContext) -> None:
 
     await session.start(agent=agent, room=ctx.room)
     logger.info("AgentSession started — Aiva is speaking the greeting.")
+
+    # Persist the live transcript + call-end as they happen. Both handlers are
+    # fire-and-forget tasks, so a slow backend never delays the spoken turn.
+    from livekit.agents.voice.events import (
+        CloseEvent,
+        ConversationItemAddedEvent,
+        UserInputTranscribedEvent,
+    )
+    from livekit.agents.llm import ChatMessage
+
+    @session.on("user_input_transcribed")
+    def _on_user_transcribed(event: UserInputTranscribedEvent) -> None:
+        if not event.is_final or not (event.transcript or "").strip():
+            return
+        call_logger._spawn(call_logger.record_user_turn(event.transcript))
+
+    @session.on("conversation_item_added")
+    def _on_conversation_item_added(event: ConversationItemAddedEvent) -> None:
+        item = event.item
+        if not isinstance(item, ChatMessage) or item.role != "assistant":
+            return
+        text = item.text_content
+        if not text or not text.strip():
+            return
+        call_logger._spawn(call_logger.record_assistant_turn(text))
+
+    @session.on("close")
+    def _on_close(_event: CloseEvent) -> None:
+        call_logger._spawn(call_logger.record_end())
+
     await session.say(greeting, allow_interruptions=True)
 
 

@@ -109,6 +109,8 @@ export const POST = withWebhookSecret(async (req) => {
     return ok({
       booked: true,
       idempotent,
+      appointmentId: appointment.id,
+      patientId: appointment.patient.id,
       appointment: {
         doctor: appointment.doctor.name,
         patient: appointment.patient.fullName,
