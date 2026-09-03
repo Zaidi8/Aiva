@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from datetime import datetime, timedelta
 from typing import Any
 
 import aiohttp
@@ -32,6 +33,30 @@ def _fmt_time_12h(hhmm: str) -> str:
         return f"{h12}:{m:02d} {suffix}" if m else f"{h12} {suffix}"
     except Exception:
         return hhmm  # fall back to raw if unparseable
+
+
+def _weekday_table(today: str, timezone: str = "Asia/Karachi") -> str:
+    """Build a day-of-week lookup table so the model never has to compute
+    weekdays from dates (small LLMs systematically get this wrong).
+
+    `today` is the current date in the clinic timezone ("YYYY-MM-DD"). Returns
+    a compact multi-line mapping of dates → weekday names spanning ~1 week before
+    and ~1 week after today, which the system prompt tells the model is
+    authoritative. Falls back to `today` alone if the date won't parse.
+    """
+    try:
+        base = datetime.strptime(today, "%Y-%m-%d").date()
+    except Exception:
+        return today
+
+    days: list[str] = []
+    for offset in range(-7, 8):
+        d = base + timedelta(days=offset)
+        label = "TODAY" if offset == 0 else ""
+        days.append(
+            f"{d.strftime('%Y-%m-%d')} = {d.strftime('%A')}{('  (' + label + ')') if label else ''}"
+        )
+    return "\n".join(days)
 
 # The context endpoint does several DB round-trips; from a backend that sits far
 # from the DB region this can take a few seconds. 2.5s was too tight and caused
@@ -207,11 +232,23 @@ def render_system_prompt(context: dict[str, Any], today: str | None = None) -> s
             f"- Today's date is {today}. Resolve relative dates the caller says "
             "(\"tomorrow\", \"next Monday\", \"coming Thursday\", \"the 14th\") to "
             "an exact YYYY-MM-DD yourself before using a tool — the tools only "
-            "accept YYYY-MM-DD. IMPORTANT: when the caller says \"coming\" or "
-            "\"next\" followed by a day name, always pick the NEXT occurrence of "
-            "that day — never today, even if today IS that day. For example, if "
-            "today is Thursday and the caller says \"coming Thursday\", pick the "
-            "following Thursday, not today."
+            "accept YYYY-MM-DD."
+        )
+        lines.append(
+            "- Use the day-of-week lookup table below to get the correct weekday "
+            "for any date — NEVER work it out yourself, you get it wrong. The "
+            "table is authoritative."
+        )
+        lines.append(
+            "Day-of-week lookup: "
+            + _weekday_table(today, timezone).replace("\n", " | ")
+        )
+        lines.append(
+            "- When the caller says \"coming\" or \"next\" followed by a day name, "
+            "always pick the NEXT occurrence of that day — never today, even if "
+            "today IS that day. If the caller corrects a day or date you stated, "
+            "re-check the table above immediately and acknowledge their correction; "
+            "never keep arguing a wrong weekday once it's been pointed out."
         )
     lines.append(
         "- Look at each doctor's working days above BEFORE calling check_availability. "
@@ -227,68 +264,94 @@ def render_system_prompt(context: dict[str, Any], today: str | None = None) -> s
     )
     lines.append("")
 
+    auto_book = ai.get("autoBook", True)
+    handle_rescheduling = ai.get("handleRescheduling", False)
+
     lines.append("# What you can do")
-    lines.append(
-        "- Answer questions about the clinic and its doctors, and BOOK, RESCHEDULE, "
-        "and CANCEL appointments. Always use your tools (described with each) rather "
-        "than guessing. Check open times before booking, and to cancel or move an "
-        "appointment look it up by phone first. When the caller names a specific "
-        "time, check THAT time — don't read out the whole day's slots."
-    )
+    if auto_book and handle_rescheduling:
+        lines.append(
+            "- Answer questions about the clinic and its doctors, and BOOK, "
+            "RESCHEDULE, and CANCEL appointments. Always use your tools (described "
+            "with each) rather than guessing. Check open times before booking, and "
+            "to cancel or move an appointment look it up by phone first. When the "
+            "caller names a specific time, check THAT time — don't read out the "
+            "whole day's slots."
+        )
+    elif auto_book:
+        lines.append(
+            "- Answer questions about the clinic and its doctors, and BOOK new "
+            "appointments. Always use your tools (described with each) rather than "
+            "guessing. Check open times before booking. When the caller names a "
+            "specific time, check THAT time — don't read out the whole day's slots."
+        )
+    else:
+        lines.append(
+            "- Answer questions about the clinic, its doctors, and availability. "
+            "You are NOT able to book, reschedule, or cancel appointments yourself."
+        )
     lines.append("")
-    lines.append("# How to book (follow exactly)")
-    lines.append(
-        "1. Check the specific time is open first (use check_availability). "
-        "If it isn't, tell them and offer the nearest open times — but NEVER "
-        "quietly book a different time than they asked for. The caller must "
-        "pick the new time out loud."
-    )
-    lines.append(
-        "2. Ask the caller for their full name and phone number. WAIT for them to "
-        "answer — do NOT proceed until you hear a real name and phone number spoken "
-        "by the caller. Never make up, guess, or fill in these values yourself."
-    )
-    lines.append(
-        "3. Read the whole booking back — doctor, date, time, and name — using "
-        "the exact time they chose, and ask them to confirm."
-    )
-    lines.append(
-        "4. Only after they clearly say yes, call book_appointment with the "
-        "information the caller gave you. Then tell them it's booked."
-    )
-    lines.append(
-        "- Never call book_appointment without the caller's real phone number, "
-        "real name, and a spoken yes. Never change the time on your own."
-    )
-    lines.append(
-        "- If check_availability says the doctor has NO open slots on the requested "
-        "date, that means they don't work that day. Tell the caller which days that "
-        "doctor IS available (from the schedule shown above) and ask them to pick a "
-        "different day. Do NOT try other times on the same day — there are none."
-    )
+    if auto_book:
+        lines.append("# How to book (follow exactly)")
+        lines.append(
+            "1. Check the specific time is open first (use check_availability). "
+            "If it isn't, tell them and offer the nearest open times — but NEVER "
+            "quietly book a different time than they asked for. The caller must "
+            "pick the new time out loud."
+        )
+        lines.append(
+            "2. Ask the caller for their full name and phone number. WAIT for them to "
+            "answer — do NOT proceed until you hear a real name and phone number spoken "
+            "by the caller. Never make up, guess, or fill in these values yourself."
+        )
+        lines.append(
+            "3. Read the whole booking back — doctor, date, time, and name — using "
+            "the exact time they chose, and ask them to confirm."
+        )
+        lines.append(
+            "4. Only after they clearly say yes, call book_appointment with the "
+            "information the caller gave you. Then tell them it's booked."
+        )
+        lines.append(
+            "- Never call book_appointment without the caller's real phone number, "
+            "real name, and a spoken yes. Never change the time on your own."
+        )
+        lines.append(
+            "- If check_availability says the doctor has NO open slots on the requested "
+            "date, that means they don't work that day. Tell the caller which days that "
+            "doctor IS available (from the schedule shown above) and ask them to pick a "
+            "different day. Do NOT try other times on the same day — there are none."
+        )
+    else:
+        lines.append(
+            "- If a caller asks to book an appointment, take their name, phone "
+            "number, preferred doctor, and desired date/time, and tell them a "
+            "human teammate will call them back to complete the booking. Do NOT "
+            "book, and do not pretend the booking is done."
+        )
     lines.append("")
 
-    lines.append("# How to cancel or reschedule (follow exactly)")
-    lines.append(
-        "1. First look the appointment up by the caller's phone number, and "
-        "identify the exact one — doctor, date, and time."
-    )
-    lines.append(
-        "2. To reschedule, check the NEW time is open first, the same way you do "
-        "for booking."
-    )
-    lines.append(
-        "3. Read it back — for a cancel, the appointment being cancelled; for a "
-        "move, the old time and the new time — and ask the caller to confirm."
-    )
-    lines.append(
-        "4. Only after they clearly say yes, cancel or move it. Then tell them it's "
-        "done. Never cancel or move an appointment without that spoken confirmation."
-    )
-    lines.append(
-        "- You cannot transfer to a human. For anything you can't do, say a "
-        "teammate will follow up and offer a callback."
-    )
+    if handle_rescheduling:
+        lines.append("# How to cancel or reschedule (follow exactly)")
+        lines.append(
+            "1. First look the appointment up by the caller's phone number, and "
+            "identify the exact one — doctor, date, and time."
+        )
+        lines.append(
+            "2. To reschedule, check the NEW time is open first, the same way you do "
+            "for booking."
+        )
+        lines.append(
+            "3. Read it back — for a cancel, the appointment being cancelled; for a "
+            "move, the old time and the new time — and ask the caller to confirm."
+        )
+        lines.append(
+            "4. Only after they clearly say yes, cancel or move it. Then tell them it's "
+            "done. Never cancel or move an appointment without that spoken confirmation."
+        )
+        lines.append(
+            "- You cannot transfer to a human. For anything you can't do, say a "
+            "teammate will follow up and offer a callback."
+        )
     if ai.get("emergencyTransfer", False):
         lines.append(
             "- If the caller describes a medical emergency, tell them to hang up "

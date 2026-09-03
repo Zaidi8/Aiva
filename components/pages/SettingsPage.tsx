@@ -22,7 +22,7 @@ import { toast } from 'sonner';
 import { useState, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { useRouter } from 'next/navigation';
-import { User, Bell, Lock, Bot, Palette, Save, AlertTriangle } from 'lucide-react';
+import { User, Lock, Bot, Save, AlertTriangle } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
@@ -269,22 +269,70 @@ export function SettingsPage({
     }
   });
 
-  const handleNotYetImplemented = () => {
-    toast.info('This section is not connected yet.', {
-      description: 'Coming in a future update.',
-    });
-  };
+  // ── Security form (the caller's OWN password, via Supabase Auth) ────────
+  interface PasswordFormValues {
+    currentPassword: string;
+    newPassword: string;
+    confirmPassword: string;
+  }
+  const passwordForm = useForm<PasswordFormValues>({
+    defaultValues: {
+      currentPassword: '',
+      newPassword: '',
+      confirmPassword: '',
+    },
+    mode: 'onSubmit',
+  });
+
+  const onPasswordSubmit = passwordForm.handleSubmit(async (values) => {
+    passwordForm.clearErrors();
+    try {
+      await apiPatch('/api/auth/password', {
+        currentPassword: values.currentPassword,
+        newPassword: values.newPassword,
+        confirmPassword: values.confirmPassword,
+      });
+      toast.success('Password updated.');
+      passwordForm.reset();
+    } catch (e) {
+      if (e instanceof ApiError && e.fields) {
+        for (const [apiKey, errs] of Object.entries(e.fields)) {
+          const formKey: keyof PasswordFormValues | null =
+            apiKey === 'currentPassword'
+              ? 'currentPassword'
+              : apiKey === 'newPassword'
+                ? 'newPassword'
+                : apiKey === 'confirmPassword'
+                  ? 'confirmPassword'
+                  : null;
+          if (formKey) {
+            passwordForm.setError(formKey, { message: errs[0] });
+          }
+        }
+        toast.error('Please fix the highlighted fields.');
+      } else if (e instanceof ApiError) {
+        toast.error(e.message);
+      } else {
+        toast.error('Something went wrong. Try again.');
+      }
+    }
+  });
 
   const profileSubmitting = profileForm.formState.isSubmitting;
   const accountSubmitting = accountForm.formState.isSubmitting;
   const aiSubmitting = aiForm.formState.isSubmitting;
+  const passwordSubmitting = passwordForm.formState.isSubmitting;
 
   const TABS = [
     { value: 'profile', label: 'Profile', icon: User },
-    { value: 'notifications', label: 'Notifications', icon: Bell },
+    // Notifications & Appearance are commented out — both are UI-only shells
+    // with no backend (no notification-preference model / no email-SMS
+    // plumbing; no theming/persistence system). They'll be re-added when real
+    // features ship (see ROADMAP Phases 6+).
+    // { value: 'notifications', label: 'Notifications', icon: Bell },
     { value: 'security', label: 'Security', icon: Lock },
     { value: 'ai', label: 'AI Settings', icon: Bot },
-    { value: 'appearance', label: 'Appearance', icon: Palette },
+    // { value: 'appearance', label: 'Appearance', icon: Palette },
   ];
 
   return (
@@ -296,7 +344,7 @@ export function SettingsPage({
 
       <div className="mx-auto max-w-5xl p-6">
         <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="mb-6 grid w-full grid-cols-5">
+          <TabsList className="mb-6 grid w-full grid-cols-3">
             {TABS.map((t) => (
               <TabsTrigger
                 key={t.value}
@@ -466,11 +514,12 @@ export function SettingsPage({
             </SectionCard>
           </TabsContent>
 
-          {/* ── Notifications Settings (UI-only, no backend yet) ─────────── */}
-          <TabsContent value="notifications" className="space-y-6">
+          {/* ── Notifications (commented out — UI-only shell, no backend) ──
+          {/* Coming soon. These toggles aren't persisted yet. */}
+          {/* <TabsContent value="notifications" className="space-y-6">
             <SectionCard
               title="Notification preferences"
-              description="Coming soon. These toggles aren’t persisted yet."
+              description="Coming soon. These toggles aren't persisted yet."
             >
               <div className="space-y-4">
                 {[
@@ -493,42 +542,61 @@ export function SettingsPage({
                 </Button>
               </div>
             </SectionCard>
-          </TabsContent>
+          </TabsContent> */}
+          ────────────────────────────────────────────────────────────────
 
-          {/* ── Security Settings (UI-only) ──────────────────────────────── */}
+
+          {/* ── Security Settings ────────────────────────────────────────── */}
           <TabsContent value="security" className="space-y-6">
             <SectionCard
               title="Change password"
-              description="Password updates aren’t wired up yet. Use Supabase Auth directly until this is connected."
+              description="Update the password for your login. You’ll need your current password to confirm the change."
             >
-              <div className="space-y-4">
+              <form onSubmit={onPasswordSubmit} className="space-y-6" noValidate>
                 <div className="space-y-2">
                   <Label htmlFor="current-password">Current password</Label>
-                  <Input id="current-password" type="password" />
+                  <Input
+                    id="current-password"
+                    type="password"
+                    autoComplete="current-password"
+                    aria-invalid={!!passwordForm.formState.errors.currentPassword}
+                    {...passwordForm.register('currentPassword')}
+                  />
+                  <FieldError
+                    message={passwordForm.formState.errors.currentPassword?.message}
+                  />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="new-password">New password</Label>
-                  <Input id="new-password" type="password" />
+                  <Input
+                    id="new-password"
+                    type="password"
+                    autoComplete="new-password"
+                    aria-invalid={!!passwordForm.formState.errors.newPassword}
+                    {...passwordForm.register('newPassword')}
+                  />
+                  <FieldError
+                    message={passwordForm.formState.errors.newPassword?.message}
+                  />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="confirm-password">Confirm new password</Label>
-                  <Input id="confirm-password" type="password" />
+                  <Input
+                    id="confirm-password"
+                    type="password"
+                    autoComplete="new-password"
+                    aria-invalid={!!passwordForm.formState.errors.confirmPassword}
+                    {...passwordForm.register('confirmPassword')}
+                  />
+                  <FieldError
+                    message={passwordForm.formState.errors.confirmPassword?.message}
+                  />
                 </div>
-                <Button onClick={handleNotYetImplemented}>
+                <Button type="submit" disabled={passwordSubmitting}>
                   <Save />
-                  Update password
+                  {passwordSubmitting ? 'Saving…' : 'Update password'}
                 </Button>
-              </div>
-            </SectionCard>
-
-            <SectionCard
-              title="Two-factor authentication"
-              description="Add an extra layer of security to your account."
-            >
-              <ToggleRow
-                label="Enable 2FA"
-                description="Secure your account with two-factor authentication"
-              />
+              </form>
             </SectionCard>
           </TabsContent>
 
@@ -590,11 +658,12 @@ export function SettingsPage({
             </SectionCard>
           </TabsContent>
 
-          {/* ── Appearance Settings (UI-only) ────────────────────────────── */}
-          <TabsContent value="appearance" className="space-y-6">
+          {/* ── Appearance (commented out — UI-only shell, no backend) ─────
+          {/* Coming soon. These toggles aren't persisted yet. */}
+          {/* <TabsContent value="appearance" className="space-y-6">
             <SectionCard
               title="Theme & display"
-              description="Coming soon. These toggles aren’t persisted yet."
+              description="Coming soon. These toggles aren't persisted yet."
             >
               <div className="space-y-4">
                 {[
@@ -615,7 +684,7 @@ export function SettingsPage({
                 </Button>
               </div>
             </SectionCard>
-          </TabsContent>
+          </TabsContent> */}
         </Tabs>
       </div>
     </div>

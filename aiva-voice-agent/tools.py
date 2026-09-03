@@ -69,6 +69,13 @@ class ToolConfig:
     """Optional callback (appointment_id, patient_id) fired after a booking
     succeeds, so the call logger can link the resulting appointment/patient to the
     CallLog row. Called synchronously; fail-soft, exceptions are swallowed."""
+    auto_book: bool = True
+    """Whether this clinic lets the agent place new bookings (AiSettings.autoBook).
+    When False, `book_appointment` is NOT exposed to the LLM."""
+    handle_rescheduling: bool = False
+    """Whether this clinic lets the agent reschedule/cancel (AiSettings.
+    handleRescheduling). When False, `reschedule_appointment` and
+    `cancel_appointment` are NOT exposed to the LLM."""
 
 
 def _notify_booking(config: ToolConfig, appointment_id: str | None, patient_id: str | None) -> None:
@@ -387,11 +394,14 @@ def build_tools(config: ToolConfig) -> list:
             "Want to pick another time?"
         )
 
-    return [
+    tools: list = [
         list_doctors,
         check_availability,
         lookup_appointments,
-        book_appointment,
-        cancel_appointment,
-        reschedule_appointment,
     ]
+    if config.auto_book:
+        tools.append(book_appointment)
+    if config.handle_rescheduling:
+        tools.append(cancel_appointment)
+        tools.append(reschedule_appointment)
+    return tools

@@ -28,4 +28,26 @@ export const registerSchema = z.object({
     .pipe(z.string().min(1)),
 });
 
+// Self-service password change from Settings → Security. The caller must
+// confirm their CURRENT password (verified against Supabase Auth) and then
+// supply a new one that meets the same minimum. Mirror the error style used
+// elsewhere in Settings so the client can surface field-level errors.
+const newPassword = z
+  .string()
+  .min(8, "New password must be at least 8 characters.");
+
+export const changePasswordSchema = z
+  .object({
+    currentPassword: z
+      .string()
+      .min(1, "Current password is required."),
+    newPassword,
+    confirmPassword: z.string().min(1, "Please confirm your new password."),
+  })
+  .refine((v) => v.newPassword === v.confirmPassword, {
+    path: ["confirmPassword"],
+    message: "Passwords do not match.",
+  });
+
+export type ChangePasswordInput = z.infer<typeof changePasswordSchema>;
 export type RegisterInput = z.infer<typeof registerSchema>;

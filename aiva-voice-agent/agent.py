@@ -104,7 +104,7 @@ LLM_FAILURE_REPLY = (
 # Phase 8: how long a fetched clinic context stays usable from the per-worker
 # cache before the next call re-fetches. Clinic facts change rarely; this trades a
 # little staleness for skipping the Mumbai DB round-trip on every call's greeting.
-CONTEXT_CACHE_TTL_S = 600.0
+CONTEXT_CACHE_TTL_S = 60.0
 
 
 class AivaAgent(Agent):
@@ -464,13 +464,18 @@ async def entrypoint(ctx: JobContext) -> None:
 
     # Phase 3: read-only LLM tools, bound to this clinic's backend config. The
     # on_booking hook lets book_appointment link the resulting appointment +
-    # patient back to this call's CallLog row.
+    # patient back to this call's CallLog row. The auto_book / handle_rescheduling
+    # flags come from the clinic's AiSettings and gate the write tools below.
     tools = build_tools(
         ToolConfig(
             backend_url=backend_url,
             clinic_id=clinic_id,
             webhook_secret=webhook_secret,
             on_booking=call_logger.note_booking,
+            auto_book=bool((context.get("ai") or {}).get("autoBook", True)),
+            handle_rescheduling=bool(
+                (context.get("ai") or {}).get("handleRescheduling", False)
+            ),
         )
     )
     logger.info("Loaded %d read-only tools: %s", len(tools), [t.info.name for t in tools])
