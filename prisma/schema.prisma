@@ -96,6 +96,12 @@ enum NotificationChannel {
   Email
 }
 
+enum FailedBookingAction {
+  book
+  cancel
+  reschedule
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // CLINIC — single row in single-clinic deployments. Holds clinic-level config.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -423,6 +429,29 @@ model StaffInvitation {
   @@unique([clinicId, email])
   @@index([token])
   @@map("staff_invitation")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FAILED BOOKING — a voice-appointment write (book / cancel / reschedule) that
+// could not be persisted after the agent's own retries. The payload is stored
+// verbatim so clinic staff / a reconciliation job can replay it later instead of
+// the request vanishing silently if the caller has already hung up. `attempts`
+// records how many times the live write was attempted before it was parked here.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model FailedBooking {
+  id        String            @id @default(cuid())
+  action    FailedBookingAction
+  payload   Json               // resolved request body: doctorName/date/time/phone/newDate/newTime…
+  attempts  Int               @default(1)
+  clinicId  String            @map("clinic_id")
+  createdAt DateTime          @default(now()) @map("created_at")
+  resolvedAt DateTime?        @map("resolved_at")
+  error     String?
+
+  @@index([clinicId])
+  @@index([resolvedAt])
+  @@map("failed_booking")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

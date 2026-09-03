@@ -33,7 +33,7 @@ def _utc_iso_z() -> str:
     fails while the call still proceeds). A trailing 'Z' passes validation."""
     return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
-from typing import AsyncIterable
+from typing import AsyncIterable, Callable
 
 from dotenv import load_dotenv
 from livekit import rtc
@@ -307,6 +307,127 @@ class CallLogger:
         )
 
 
+# ────────────────────────────────────────────────────────────────────────────
+# SILENCE ESCALATION — never let the agent wait forever in dead air.
+#
+# If the caller never speaks ("are you still there?" loop goes infinite), the
+# base turn-detector leaves the agent waiting indefinitely. This watchdog arms a
+# timer each time it becomes the caller's turn (agent finished speaking and is
+# listening) and escalates in steps if no speech arrives:
+#   stage 0: silence → gentle prompt ("Are you still there?")
+#   stage 1: silence → firmer nudge ("I'm having trouble hearing you …")
+#   stage 2: silence → graceful goodbye, then hang up.
+# Any VAD-detected caller speech resets the escalation to stage 0 so a live
+# conversation proceeds untouched. Tunings are env-overridable:
+#   AIVA_SILENCE_TIMEOUT_S  (default 7.0)  — seconds of silence before each step
+#   AIVA_SILENCE_MAX_PROMPTS(default 2)    — prompts before we hang up
+# ────────────────────────────────────────────────────────────────────────────
+_SILENCE_TIMEOUT_S = float(os.environ.get("AIVA_SILENCE_TIMEOUT_S", "7.0"))
+_SILENCE_MAX_PROMPTS = int(os.environ.get("AIVA_SILENCE_MAX_PROMPTS", "2"))
+_PROMPT_STILL_THERE = "Are you still there?"
+_PROMPT_TROUBLE = (
+    "I'm having trouble hearing you. If you're still there, please go ahead."
+)
+_GOODBYE = (
+    "It seems we're having trouble connecting. Feel free to call back anytime. Goodbye."
+)
+
+
+class SilenceEscalation:
+    """Watchdog that interrupts dead air with escalating prompts, then hangs up.
+
+    Interface used by entrypoint:
+      - `install(session, shutdown_fnc)` — register event handlers + start the loop.
+      - `close()` — cancel the loop (e.g. on close/participant-disconnect).
+    """
+
+    def __init__(self) -> None:
+        self._session: AgentSession | None = None
+        self._shutdown_fnc: Callable[[], None] | None = None
+        self._arm = asyncio.Event()  # set when it's the caller's turn to speak
+        self._speech = asyncio.Event()  # set when VAD detects caller speech
+        self._task: asyncio.Task[None] | None = None
+        self._stage = 0  # 0 = none spoken, 1/2 = prompted, 3+ = hang up
+
+    # -- event handlers (registered on the AgentSession) ---------------------
+    def on_agent_state(self, event: object) -> None:
+        # The agent finished its turn and is now waiting for the caller.
+        new_state = getattr(event, "new_state", None)
+        if new_state in ("listening", "idle"):
+            self._arm.set()
+
+    def on_user_state(self, event: object) -> None:
+        # Caller is making a sound — cancel the current silence timer.
+        if getattr(event, "new_state", None) == "speaking":
+            self._speech.set()
+
+    def install(self, session: AgentSession, shutdown_fnc: Callable[[], None]) -> None:
+        """Register handlers + start the escalation loop. Idempotent."""
+        if self._task is not None:
+            return
+        self._session = session
+        self._shutdown_fnc = shutdown_fnc
+        session.on("agent_state_changed", self.on_agent_state)
+        session.on("user_state_changed", self.on_user_state)
+        self._task = asyncio.create_task(self._run())
+
+    def close(self) -> None:
+        if self._task is not None:
+            self._task.cancel()
+            self._task = None
+
+    # -- main loop -----------------------------------------------------------
+    async def _speak(self, text: str) -> None:
+        """Speak a line, tolerating the session being closed. Returns once it
+        has finished playing out (so we know the caller's turn has begun)."""
+        if self._session is None:
+            return
+        try:
+            handle = self._session.say(text, allow_interruptions=True)
+            await handle.wait_for_playout()
+        except Exception as exc:  # noqa: BLE001 — escalation must never crash the call
+            logger.debug("silence escalation say failed: %s", exc)
+
+    async def _run(self) -> None:
+        try:
+            while True:
+                # Wait until it's the caller's turn (agent is listening/idle).
+                await self._arm.wait()
+                self._arm.clear()
+
+                speech_task = asyncio.create_task(self._speech.wait())
+                try:
+                    await asyncio.wait_for(speech_task, _SILENCE_TIMEOUT_S)
+                    # Caller spoke — a normal conversation is happening. Reset the
+                    # escalation and wait for the agent's next finished turn.
+                    self._stage = 0
+                    self._speech.clear()
+                    continue
+                except asyncio.TimeoutError:
+                    pass  # no speech in the window — escalate below
+                finally:
+                    if not speech_task.done():
+                        speech_task.cancel()
+                    self._speech.clear()
+
+                # Dead air. Escalate step by step.
+                if self._stage < _SILENCE_MAX_PROMPTS:
+                    self._stage += 1
+                    await self._speak(_PROMPT_STILL_THERE if self._stage == 1 else _PROMPT_TROUBLE)
+                    # After the prompt, it's the caller's turn again.
+                    self._arm.set()
+                else:
+                    await self._speak(_GOODBYE)
+                    logger.info("Silence escalation reached stage %d — hanging up.", self._stage)
+                    if self._shutdown_fnc is not None:
+                        self._shutdown_fnc()
+                    return
+        except asyncio.CancelledError:
+            return
+        except Exception as exc:  # noqa: BLE001 — a watchdog bug must not kill the worker
+            logger.warning("Silence escalation loop error: %s", exc)
+
+
 def _extract_sip_call_info(ctx: JobContext) -> tuple[str, str, str]:
     """Pull (provider_call_id, caller_phone, dialed) from the SIP participant.
 
@@ -512,7 +633,15 @@ async def entrypoint(ctx: JobContext) -> None:
 
     @session.on("close")
     def _on_close(_event: CloseEvent) -> None:
+        silence_escalation.close()
         call_logger._spawn(call_logger.record_end())
+
+    # Phase 9: watchdog for a caller who never speaks. Without it the agent can
+    # wait in dead air forever (the turn-detector handles speech->pause, but has
+    # no "no speech at all" timeout). Arms after the greeting, prompts to
+    # re-engage, then hangs up gracefully.
+    silence_escalation = SilenceEscalation()
+    silence_escalation.install(session, shutdown_fnc=ctx.shutdown)
 
     await session.say(greeting, allow_interruptions=True)
 
