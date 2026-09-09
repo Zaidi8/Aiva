@@ -19,6 +19,8 @@ import {
   User,
   Plus,
   Check,
+  CalendarClock,
+  Trash2,
 } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
@@ -36,9 +38,23 @@ import {
 import { Calendar } from '../ui/calendar';
 import { TopBar } from '../ui/TopBar';
 import { PaginationBar } from '../ui/PaginationBar';
-import { apiPatch, ApiError } from '@/lib/client/fetcher';
+import { apiPatch, apiDelete, ApiError } from '@/lib/client/fetcher';
 import { toast } from 'sonner';
 import { NewAppointmentModal } from '../ui/NewAppointmentModal';
+import {
+  RescheduleAppointmentModal,
+  type RescheduleTarget,
+} from '../ui/RescheduleAppointmentModal';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '../ui/alert-dialog';
 import type { AppointmentStatus, AppointmentType } from '@prisma/client';
 
 interface AppointmentRow {
@@ -126,6 +142,9 @@ export function AppointmentsPage({
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [isNewAppointmentModalOpen, setIsNewAppointmentModalOpen] =
     useState(false);
+  const [rescheduleTarget, setRescheduleTarget] =
+    useState<RescheduleTarget | null>(null);
+  const [cancelTarget, setCancelTarget] = useState<AppointmentRow | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
 
@@ -141,6 +160,20 @@ export function AppointmentsPage({
     } catch (err) {
       toast.error(
         err instanceof ApiError ? err.message : 'Could not confirm appointment.',
+      );
+    }
+  };
+
+  const cancelAppointment = async (id: string, patientName: string) => {
+    try {
+      await apiDelete(`/api/appointments/${id}`);
+      toast.success(`${patientName}'s appointment cancelled.`);
+      setCancelTarget(null);
+      refresh();
+    } catch (err) {
+      setCancelTarget(null);
+      toast.error(
+        err instanceof ApiError ? err.message : 'Could not cancel appointment.',
       );
     }
   };
@@ -366,20 +399,52 @@ export function AppointmentsPage({
                   <div className="flex flex-wrap items-center gap-2">
                     <Badge variant="secondary">{appointment.type}</Badge>
                     <StatusBadge status={appointment.status} />
-                    {appointment.status === 'Pending' && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() =>
-                          confirmAppointment(
-                            appointment.id,
-                            appointment.patient.fullName,
-                          )
-                        }
-                      >
-                        <Check />
-                        Approve
-                      </Button>
+                    {canWrite && (
+                      <>
+                        {appointment.status === 'Pending' && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() =>
+                              confirmAppointment(
+                                appointment.id,
+                                appointment.patient.fullName,
+                              )
+                            }
+                          >
+                            <Check />
+                            Approve
+                          </Button>
+                        )}
+                        {(appointment.status === 'Pending' || appointment.status === 'Confirmed') && (
+                          <>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() =>
+                                setRescheduleTarget({
+                                  id: appointment.id,
+                                  scheduledAt: appointment.scheduledAt,
+                                  patientName: appointment.patient.fullName,
+                                  doctor: appointment.doctor,
+                                })
+                              }
+                            >
+                              <CalendarClock />
+                              Reschedule
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="border-destructive/30 text-destructive hover:bg-destructive-muted hover:text-destructive"
+                              onClick={() => setCancelTarget(appointment)}
+                            >
+                              <Trash2 />
+                              Cancel
+                            </Button>
+                          </>
+                        )}
+                      </>
                     )}
                   </div>
                 </li>
@@ -413,6 +478,43 @@ export function AppointmentsPage({
           onCreated={refresh}
         />
       )}
+      {canWrite && (
+        <RescheduleAppointmentModal
+          isOpen={rescheduleTarget !== null}
+          onClose={() => setRescheduleTarget(null)}
+          target={rescheduleTarget}
+          onRescheduled={refresh}
+        />
+      )}
+      <AlertDialog
+        open={cancelTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setCancelTarget(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Cancel appointment?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {cancelTarget
+                ? `This will permanently cancel ${cancelTarget.patient.fullName}'s appointment with ${cancelTarget.doctor.name}. You can re-book this slot later.`
+                : ''}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep appointment</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() =>
+                cancelTarget &&
+                cancelAppointment(cancelTarget.id, cancelTarget.patient.fullName)
+              }
+            >
+              Cancel appointment
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

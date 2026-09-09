@@ -188,10 +188,20 @@ export async function computeAvailability(
   // wall-clock times to true instants. We iterate UTC days across the (padded)
   // range and dedupe by local date so each local day is visited exactly once
   // regardless of offset.
+  //
+  // The loop must run one UTC day PAST the window: for a negative-offset
+  // timezone (e.g. America/New_York, UTC-4) the window's last local day begins
+  // on the following UTC day, and ending the loop at `args.to` silently drops
+  // every slot in it.
   const slots: AvailableSlot[] = [];
   const dayMs = 24 * 60 * 60 * 1000;
   const seenLocalDates = new Set<string>();
-  for (let d = startOfDayUTC(args.from); d <= args.to; d = new Date(d.getTime() + dayMs)) {
+  const lastUtcDay = startOfDayUTC(args.to);
+  for (
+    let d = startOfDayUTC(args.from);
+    d <= new Date(lastUtcDay.getTime() + dayMs);
+    d = new Date(d.getTime() + dayMs)
+  ) {
     const localDate = toLocalDate(d, args.timezone); // YYYY-MM-DD in clinic tz
     if (seenLocalDates.has(localDate)) continue;
     seenLocalDates.add(localDate);
