@@ -18,6 +18,7 @@ import { prisma } from "@/lib/prisma";
 import { clinicWhere } from "@/lib/clinic-scope";
 import { normalizePhone } from "@/lib/voice/phone";
 import type { UpdateClinicInput } from "@/lib/validations/clinic";
+import { timeStringSchema } from "@/lib/validations/clinic";
 
 // Thrown when a caller tries to set voicePhone (go live) before the clinic can
 // actually book anyone. The route maps this to a 409 with the message.
@@ -60,6 +61,22 @@ export async function updateClinic(
       );
     }
     data.voicePhone = normalized;
+  }
+
+  // Normalize openingHours: keep only entries with real HH:mm start+end times,
+  // last-valid-wins per day, sorted Sunday-first. An empty array clears hours.
+  if (Array.isArray(data.openingHours)) {
+    const seen = new Map<number, { dayOfWeek: number; startTime: string; endTime: string }>();
+    for (const h of data.openingHours) {
+      if (!timeStringSchema.safeParse(h.startTime).success) continue;
+      if (!timeStringSchema.safeParse(h.endTime).success) continue;
+      seen.set(h.dayOfWeek, {
+        dayOfWeek: h.dayOfWeek,
+        startTime: h.startTime,
+        endTime: h.endTime,
+      });
+    }
+    data.openingHours = [...seen.values()].sort((a, b) => a.dayOfWeek - b.dayOfWeek);
   }
 
   return prisma.clinic.update({

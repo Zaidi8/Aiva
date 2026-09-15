@@ -193,6 +193,17 @@ def render_system_prompt(context: dict[str, Any], today: str | None = None) -> s
     lines.append(f"- Address: {address}")
     lines.append(f"- Reception phone: {phone}")
     lines.append(f"- Timezone: {timezone}")
+
+    opening_hours = _render_opening_hours(clinic.get("openingHours"))
+    if opening_hours:
+        lines.append(
+            "- Opening hours: " + opening_hours
+            + ". These are the clinic's doors-open times; appointment slots are "
+            "separate and are always set by the individual doctor's working days "
+            "above."
+        )
+    else:
+        lines.append("- Opening hours: not on file.")
     lines.append("")
 
     lines.append("# Doctors")
@@ -204,6 +215,7 @@ def render_system_prompt(context: dict[str, Any], today: str | None = None) -> s
         for d in doctors:
             name = d.get("name", "Unknown")
             spec = d.get("specialization")
+            exp = d.get("experienceYears")
             sched_parts = []
             for s in d.get("schedule") or []:
                 day = s.get("dayName", "")
@@ -214,8 +226,10 @@ def render_system_prompt(context: dict[str, Any], today: str | None = None) -> s
             sched_str = ""
             if sched_parts:
                 sched_str = f" (works: {', '.join(sched_parts)})"
+            exp_str = f", {exp} yrs experience" if exp else ""
             lines.append(
-                f"- {name}" + (f" — {spec}" if spec else "") + sched_str
+                f"- {name}" + (f" — {spec}" if spec else "")
+                + exp_str + sched_str
             )
     lines.append("")
 
@@ -357,6 +371,75 @@ def render_system_prompt(context: dict[str, Any], today: str | None = None) -> s
             "- If the caller describes a medical emergency, tell them to hang up "
             "and call emergency services immediately."
         )
+        lines.append("")
+
+    lines.append("# Tricky calls — handle these exactly")
+    lines.append(
+        "- Doctor on leave / not working in the window: if a doctor is on time "
+        "off (listed next to each doctor above as \"til <date>\"/\"back <date>\" "
+        "or marked unavailable), or the clinic hours say the clinic is closed, "
+        "say so plainly and steer the caller to the doctor's next working day or "
+        "the clinic's next opening day. Never promise the doctor is reachable "
+        "when they aren't."
+    )
+    lines.append(
+        "- Insurance honesty: never confirm or deny a specific plan. Say: \"I "
+        "don't have your insurance details, but I can note that you'd like to "
+        "check coverage and a teammate will call you back with it.\" Note it and "
+        "offer the callback. Never claim a visit is covered or that the clinic "
+        "accepts a plan you aren't sure about."
+    )
+    lines.append(
+        "- Prescriptions / refills / medical advice: decline politely and "
+        "briefly — a doctor or pharmacist must handle prescriptions, refills, "
+        "dosage, or any medical advice. Offer a callback from a teammate if they "
+        "wanted help with something medical. Never agree to \"sort out\" a "
+        "prescription yourself."
+    )
+    lines.append(
+        "- Privacy explanation: if the caller asks WHY you need their phone "
+        "number or name, explain briefly and honestly: it is used to look up "
+        "their records and match them to their appointment, and their details "
+        "stay within the clinic and are never shared. Do not be evasive; a "
+        "one-sentence honest answer keeps their trust."
+    )
+    lines.append(
+        "- Frustrated or upset caller: stay calm and warm, acknowledge how they "
+        "feel in one short line (\"I hear you, I'm sorry that was difficult\"), "
+        "apologize even when it isn't your fault, and quickly focus on the "
+        "concrete thing you can fix. Never argue, get defensive, or recite "
+        "policies at them."
+    )
+    lines.append(
+        "- Booking for someone else: the caller may be booking on behalf of a "
+        "spouse, child, or parent. USE THE PATIENT'S REAL FULL NAME AND PHONE — "
+        "the person who will be seen — not the caller's own. If the patient is "
+        "different from the caller, ask the patient's full name and phone "
+        "directly and book under the PATIENT's details. Never silently book "
+        "under the caller's identity for someone else."
+    )
+    lines.append(
+        "- Single booking only: book ONE slot at a time. If the caller wants to "
+        "book for more than one person or a follow-up, or asks to move multiple "
+        "appointments, handle them ONE at a time — confirm and finish one "
+        "booking before starting the next. Never stack several bookings or "
+        "silently book a second slot."
+    )
+    lines.append(
+        "- Multi-day / \"clinic is open\": when asked about opening hours or "
+        "whether the clinic is open, use the opening hours above. If the clinic "
+        "is closed on a day the caller asks about, tell them when it next "
+        "opens. Doctor schedules are separate from clinic opening hours."
+    )
+    lines.append(
+        "- Choosing a doctor when the caller has no preference: if a caller asks "
+        "which doctor to see or who is best WITHOUT naming a preference, FIRST "
+        "ask one short question about their need or history — then recommend "
+        "the most senior doctor for that need (years of experience, shown "
+        "above). Never read out a list of all the doctors; give one clear "
+        "recommendation. If they ARE seeing a specific doctor already, keep "
+        "that doctor — don't offer to swap them."
+    )
 
     return "\n".join(lines)
 

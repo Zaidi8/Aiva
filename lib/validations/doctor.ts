@@ -6,6 +6,14 @@
 
 import { z } from "zod";
 
+const yearsOfExperience = z
+  .number()
+  .int()
+  .min(0)
+  .max(70, "Must be 70 years or fewer.")
+  .optional()
+  .or(z.literal("").transform(() => undefined));
+
 export const createDoctorSchema = z.object({
   name: z.string().trim().min(1, "Name is required.").max(120),
   specialization: z.string().trim().min(1, "Specialization is required.").max(120),
@@ -21,6 +29,8 @@ export const createDoctorSchema = z.object({
     .max(32)
     .optional()
     .or(z.literal("").transform(() => undefined)),
+  // Years of practice — drives the AI receptionist's senior-most recommendation.
+  experienceYears: yearsOfExperience,
 });
 
 export const updateDoctorSchema = createDoctorSchema.partial();

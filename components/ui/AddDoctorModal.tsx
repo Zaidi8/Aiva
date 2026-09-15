@@ -31,6 +31,7 @@ interface DoctorFormValues {
   specialization: string;
   email?: string;
   phone?: string;
+  experienceYears?: string;
 }
 
 const EMPTY_VALUES: DoctorFormValues = {
@@ -38,6 +39,7 @@ const EMPTY_VALUES: DoctorFormValues = {
   specialization: '',
   email: '',
   phone: '',
+  experienceYears: undefined,
 };
 
 export function AddDoctorModal({
@@ -63,6 +65,7 @@ export function AddDoctorModal({
       specialization: doctor?.specialization ?? '',
       email: doctor?.email ?? '',
       phone: doctor?.phone ?? '',
+      experienceYears: doctor?.experienceYears?.toString() ?? '',
     });
   }, [isOpen, doctor, form]);
 
@@ -75,6 +78,9 @@ export function AddDoctorModal({
       specialization: values.specialization.trim(),
       email: values.email?.trim() || undefined,
       phone: values.phone?.trim() || undefined,
+      experienceYears: values.experienceYears
+        ? Number(values.experienceYears)
+        : undefined,
     };
 
     try {
@@ -130,19 +136,39 @@ export function AddDoctorModal({
             )}
           </div>
 
-          <div className="space-y-1.5">
-            <Label htmlFor="specialization">Specialization</Label>
-            <Input
-              id="specialization"
-              placeholder="General Physician"
-              aria-invalid={!!form.formState.errors.specialization}
-              {...form.register('specialization')}
-            />
-            {form.formState.errors.specialization && (
-              <p className="text-xs text-destructive">
-                {form.formState.errors.specialization.message}
-              </p>
-            )}
+          <div className="gap-4 grid grid-cols-1 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="specialization">Specialization</Label>
+              <Input
+                id="specialization"
+                placeholder="Cardiologist"
+                aria-invalid={!!form.formState.errors.specialization}
+                {...form.register('specialization')}
+              />
+              {form.formState.errors.specialization && (
+                <p className="text-xs text-destructive">
+                  {form.formState.errors.specialization.message}
+                </p>
+              )}
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="experienceYears">Experience (years, optional)</Label>
+              <Input
+                id="experienceYears"
+                type="number"
+                min={0}
+                max={70}
+                placeholder="12"
+                aria-invalid={!!form.formState.errors.experienceYears}
+                {...form.register('experienceYears')}
+              />
+              {form.formState.errors.experienceYears && (
+                <p className="text-xs text-destructive">
+                  {form.formState.errors.experienceYears.message}
+                </p>
+              )}
+            </div>
           </div>
 
           <div className="grid grid-cols-2 gap-4">

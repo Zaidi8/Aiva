@@ -20,11 +20,24 @@ const doctorScheduleEntrySchema = z.object({
   endTime: timeStringSchema,
 });
 
+const doctorTimeOffEntrySchema = z.object({
+  startDate: z.string(),
+  endDate: z.string(),
+});
+
 const doctorSchema = z.object({
   id: z.string(),
   name: z.string(),
   specialization: z.string().nullable(),
+  experienceYears: z.number().int().nullable().optional(),
   schedule: z.array(doctorScheduleEntrySchema),
+  timeOff: z.array(doctorTimeOffEntrySchema),
+});
+
+const openingHoursEntrySchema = z.object({
+  dayOfWeek: z.number().int().min(0).max(6),
+  startTime: timeStringSchema,
+  endTime: timeStringSchema,
 });
 
 export const clinicContextSchema = z.object({
@@ -34,6 +47,7 @@ export const clinicContextSchema = z.object({
     address: z.string().nullable(),
     phone: z.string().nullable(),
     timezone: z.string(),
+    openingHours: z.array(openingHoursEntrySchema),
   }),
   ai: z.object({
     agentName: z.string(),

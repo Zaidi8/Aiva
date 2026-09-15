@@ -40,6 +40,11 @@ interface InitialStaff {
   phone: string;
   jobTitle: string;
 }
+interface ClinicOpeningHour {
+  dayOfWeek: number;
+  startTime: string;
+  endTime: string;
+}
 interface InitialClinic {
   name: string;
   phone: string;
@@ -47,6 +52,7 @@ interface InitialClinic {
   address: string;
   voicePhone: string;
   timezone: string;
+  openingHours: ClinicOpeningHour[];
 }
 interface InitialAiSettings {
   agentName: string;
@@ -76,6 +82,9 @@ interface ProfileFormValues {
   clinicEmail: string;
   clinicAddress: string;
   clinicVoicePhone: string;
+  // Not part of the react-hook-form values (handled by OpeningHoursEditor
+  // state) — kept here so the type stays explicit about what's submitted.
+  openingHours?: ClinicOpeningHour[];
 }
 
 interface AccountFormValues {
@@ -90,6 +99,79 @@ type AiFormValues = InitialAiSettings;
 function FieldError({ message }: { message?: string }) {
   if (!message) return null;
   return <p className="text-xs text-destructive">{message}</p>;
+}
+
+const DAY_LABELS = [
+  'Sunday',
+  'Monday',
+  'Tuesday',
+  'Wednesday',
+  'Thursday',
+  'Friday',
+  'Saturday',
+];
+
+// Opening-hours editor: one row per day with start/end "HH:mm" time inputs.
+// An empty row (both blank) means "closed that day" and is dropped on save.
+// These feed the AI receptionist's clinic-hours answers, so they're stored
+// as structured per-day times — never free text the agent has to parse.
+function OpeningHoursEditor({
+  value,
+  onChange,
+}: {
+  value: ClinicOpeningHour[];
+  onChange: (hours: ClinicOpeningHour[]) => void;
+}) {
+  const byDay = new Map<number, { start: string; end: string }>();
+  for (const h of value) byDay.set(h.dayOfWeek, { start: h.startTime, end: h.endTime });
+
+  const updateDay = (day: number, patch: { start?: string; end?: string }) => {
+    const current = byDay.get(day) ?? { start: '', end: '' };
+    const next = { ...current, ...patch };
+    const nextHours = value
+      .filter((h) => h.dayOfWeek !== day)
+      .concat(
+        next.start || next.end
+          ? [{ dayOfWeek: day, startTime: next.start, endTime: next.end }]
+          : [],
+      )
+      .sort((a, b) => a.dayOfWeek - b.dayOfWeek);
+    onChange(nextHours);
+  };
+
+  return (
+    <div className="space-y-2 rounded-lg border border-border bg-muted/40 p-4">
+      <div className="flex items-center justify-between gap-2">
+        <p className="font-medium text-foreground">Clinic opening hours</p>
+        <p className="text-xs text-muted-foreground">
+          The AI receptionist answers “what time do you open?” from these.
+        </p>
+      </div>
+      {DAY_LABELS.map((label, day) => {
+        const row = byDay.get(day) ?? { start: '', end: '' };
+        return (
+          <div key={label} className="grid grid-cols-[8rem_1fr_1fr] items-center gap-3">
+            <span className="text-sm">{label}</span>
+            <Input
+              type="time"
+              aria-label={`${label} open time`}
+              value={row.start}
+              onChange={(e) => updateDay(day, { start: e.target.value })}
+            />
+            <Input
+              type="time"
+              aria-label={`${label} close time`}
+              value={row.end}
+              onChange={(e) => updateDay(day, { end: e.target.value })}
+            />
+          </div>
+        );
+      })}
+      <p className="text-xs text-muted-foreground">
+        Leave a day blank to mark it closed. Times are in the clinic's timezone.
+      </p>
+    </div>
+  );
 }
 
 // A labelled switch row (used across Notifications, AI, Appearance, Security).
@@ -133,6 +215,13 @@ export function SettingsPage({
   const router = useRouter();
   const [activeTab, setActiveTab] = useState(initialTab);
 
+  // Weekdays the clinic is open, edited on the Profile tab and submitted with
+  // the clinic PATCH. Kept outside react-hook-form because it's a list of
+  // structured rows rather than a flat scalar field.
+  const [openingHours, setOpeningHours] = useState<ClinicOpeningHour[]>(
+    initialClinic.openingHours ?? [],
+  );
+
   useEffect(() => {
     setActiveTab(initialTab);
   }, [initialTab]);
@@ -161,6 +250,7 @@ export function SettingsPage({
         email: values.clinicEmail.trim(),
         address: values.clinicAddress.trim(),
         voicePhone: values.clinicVoicePhone.trim(),
+        openingHours,
       });
       toast.success('Clinic profile saved.');
       router.refresh();
@@ -505,6 +595,8 @@ export function SettingsPage({
                     AI receptionist.
                   </p>
                 </div>
+
+                <OpeningHoursEditor value={openingHours} onChange={setOpeningHours} />
 
                 <Button type="submit" disabled={profileSubmitting}>
                   <Save />

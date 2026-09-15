@@ -16,7 +16,8 @@ import { voiceAvailabilityQuerySchema } from "@/lib/validations/voice-tools";
 
 export const runtime = "nodejs";
 
-const MAX_SLOTS = 12;
+const MAX_SLOTS = 12; // cap for any "sampled" list (exact-time branch Phase 5)
+const MINUTES_IN_DAY = 24 * 60; // Phase 10 window: default half-open edge.
 
 // "HH:mm" clinic-local → minutes since midnight, for nearest-slot ranking.
 function toMinutes(hhmm: string): number {
@@ -32,9 +33,15 @@ export const GET = withWebhookSecret(async (req) => {
     date: searchParams.get("date") ?? "",
     // optional: undefined when the caller didn't name a specific time.
     time: searchParams.get("time") || undefined,
+    // Phase 10: optional clinic-local time WINDOW edges ("HH:mm", 24h). Either
+    // may be absent (half-open bound). When at least one is present the branch
+    // below reports the slots INSIDE the window plus the nearest open slot just
+    // outside each edge instead of dumping the whole day.
+    from: searchParams.get("from") || undefined,
+    to: searchParams.get("to") || undefined,
   });
   if (!parsed.success) return failValidation(parsed.error);
-  const { clinicId, doctorName, date, time } = parsed.data;
+  const { clinicId, doctorName, date, time, from, to } = parsed.data;
   const staff = { clinicId };
 
   try {
@@ -69,11 +76,14 @@ export const GET = withWebhookSecret(async (req) => {
     }
     const doctor = match.doctor!;
 
-    const { from, to } = localDayBoundsUTC(date);
+    // Clinic-local day bounds as UTC instants. Named `dayFrom`/`dayTo` so they
+    // can't shadow the Phase 10 window's `from`/`to` ("HH:mm" string edges) that
+    // the window branch below reads from the parsed query.
+    const { from: dayFrom, to: dayTo } = localDayBoundsUTC(date);
     const slots = await computeAvailability(staff, {
       doctorId: doctor.id,
-      from,
-      to,
+      from: dayFrom,
+      to: dayTo,
       timezone: clinic.timezone,
     });
 
@@ -111,6 +121,42 @@ export const GET = withWebhookSecret(async (req) => {
         requestedTime: time,
         requestedAvailable,
         nearest,
+        totalSlots: times.length,
+      });
+    }
+
+    // Phase 10: clinic-local time WINDOW ("between 4 and 5", "morning", "after
+    // 2"). When the caller named a bound (either edge optional / half-open),
+    // don't dump the whole day — report which slots INSIDE the window are open,
+    // plus the single nearest open slot just before `from` and just after `to`
+    // (so the agent can still offer a real, near-neighbour alternative if the
+    // window itself is empty, without making it book a far-away arbitrary slot).
+    // The window is expressed in clinic-local minutes for the day already being
+    // reported.
+    if (from || to) {
+      const fromMin = from ? toMinutes(from) : 0;
+      const toMin = to ? toMinutes(to) : MINUTES_IN_DAY;
+      const inWindow = times
+        .filter((t) => toMinutes(t) >= fromMin && toMinutes(t) <= toMin)
+        .slice(0, MAX_SLOTS);
+      const before = times
+        .filter((t) => toMinutes(t) < fromMin)
+        .at(-1); // nearest open slot just BEFORE the window edge
+      const after = times
+        .filter((t) => toMinutes(t) > toMin)
+        .at(0); // nearest open slot just AFTER the window edge (times are 24h-sorted)
+      return ok({
+        resolved: true,
+        doctor: { name: doctor.name, specialization: doctor.specialization },
+        date,
+        timezone: clinic.timezone,
+        window: { from: from ?? null, to: to ?? null },
+        openInWindow: inWindow,
+        totalOpenInWindow: times.filter(
+          (t) => toMinutes(t) >= fromMin && toMinutes(t) <= toMin
+        ).length,
+        nearestBefore: before ?? null,
+        nearestAfter: after ?? null,
         totalSlots: times.length,
       });
     }

@@ -35,7 +35,23 @@ export const voiceAvailabilityQuerySchema = z.object({
     .string()
     .regex(/^([01]\d|2[0-3]):[0-5]\d$/, "time must be HH:mm (24h).")
     .optional(),
-});
+  // Phase 10: clinic-local time WINDOW the caller asked for, expressed as
+  // optional from/to edges ("HH:mm", 24h) — "between 4 and 5", "in the
+  // morning", "after 2". When at least one edge is present the endpoint
+  // reports the open slots INSIDE the window plus the nearest open slot just
+  // outside each edge, instead of dumping the whole day.
+  from: z
+    .string()
+    .regex(/^([01]\d|2[0-3]):[0-5]\d$/, "from must be HH:mm (24h).")
+    .optional(),
+  to: z
+    .string()
+    .regex(/^([01]\d|2[0-3]):[0-5]\d$/, "to must be HH:mm (24h).")
+    .optional(),
+}).refine(
+  (v) => !(v.from && v.to) || v.from <= v.to,
+  "to must not be earlier than from."
+);
 
 export const voiceAppointmentsQuerySchema = z.object({
   clinicId: z.string().min(1, "clinicId is required."),

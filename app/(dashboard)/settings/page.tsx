@@ -49,6 +49,13 @@ async function SettingsPageContent({ tab }: { tab: string }) {
         address: clinic?.address ?? '',
         voicePhone: clinic?.voicePhone ?? '',
         timezone: clinic?.timezone ?? '',
+        openingHours: Array.isArray(clinic?.openingHours)
+          ? (clinic.openingHours as Array<{
+              dayOfWeek: number;
+              startTime: string;
+              endTime: string;
+            }>)
+          : [],
       }}
       initialAiSettings={{
         agentName: aiSettings.agentName,

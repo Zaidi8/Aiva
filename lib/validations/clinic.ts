@@ -39,6 +39,22 @@ const optionalEmail = z
   .optional()
   .pipe(z.string().email("Email must be a valid email address.").optional());
 
+export const timeStringSchema = z
+  .string()
+  .regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Time must be HH:mm in 24-hour format.");
+
+// Opening hours, one entry per day (0 = Sunday … 6 = Saturday). Accepts any
+// prunable subset; "" start/end mean the clinic is closed that day (dropped).
+const openingHoursSchema = z
+  .array(
+    z.object({
+      dayOfWeek: z.number().int().min(0).max(6),
+      startTime: z.string().trim(),
+      endTime: z.string().trim(),
+    }),
+  )
+  .optional();
+
 export const updateClinicSchema = z.object({
   name: z
     .string()
@@ -59,6 +75,19 @@ export const updateClinicSchema = z.object({
   timezone: optionalTrimmed(64).refine(
     (v) => v === undefined || isValidTimeZone(v),
     { message: "Enter a valid IANA timezone (e.g. Asia/Karachi)." },
+  ),
+  // Weekly reception hours [{ dayOfWeek, startTime, endTime }] consumed by the
+  // voice agent. Empty array clears. Absent field = leave unchanged.
+  openingHours: openingHoursSchema.refine(
+    (hours) => {
+      if (!hours) return true;
+      return hours.every(
+        (h) =>
+          timeStringSchema.safeParse(h.startTime).success &&
+          timeStringSchema.safeParse(h.endTime).success,
+      );
+    },
+    { message: "Times must be HH:mm in 24-hour format." },
   ),
 });
 

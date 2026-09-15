@@ -268,16 +268,33 @@ def build_tools(config: ToolConfig) -> list:
 
     @function_tool
     async def check_availability(
-        context: RunContext, doctor_name: str, date: str, time: str = ""
+        context: RunContext,
+        doctor_name: str,
+        date: str,
+        time: str = "",
+        from_time: str = "",
+        to_time: str = "",
     ) -> str:
-        """Check a doctor's open slots. `date` is YYYY-MM-DD. If the caller named a
-        time, pass it as `time` ("HH:mm", 24h, e.g. "16:30") to get whether that
-        exact time is open plus the nearest alternatives; leave `time` empty if they
-        haven't named one. Read-only."""
+        """Check a doctor's open slots. `date` is YYYY-MM-DD (clinic-local). If
+        the caller named ONE specific time, pass it as `time` ("HH:mm", 24h, e.g.
+        "16:30") to get whether that exact time is open plus the nearest
+        alternatives. If they named a clinic-local time WINDOW instead ("between
+        4 and 5", "morning", "after 2", "before noon"), pass the edges as
+        `from_time`/`to_time` ("HH:mm", 24h; either may be empty for a half-open
+        bound) to get which slots INSIDE the window are open plus the nearest
+        open slot just outside each edge. Use at most ONE of `time` and the
+        from/to pair. Read-only."""
         _say_filler(context, "Let me check that for you.")
         params = {"doctorName": doctor_name, "date": date}
         if time.strip():
             params["time"] = time.strip()
+        elif from_time.strip() or to_time.strip():
+            # Phase 10 window: forward the clinic-local edges only when the
+            # caller named a WINDOW (mutually exclusive with a single `time`).
+            if from_time.strip():
+                params["from"] = from_time.strip()
+            if to_time.strip():
+                params["to"] = to_time.strip()
         data = await _get(config, "availability", params)
         if data is None:
             return "I couldn't check availability right now."
@@ -303,6 +320,39 @@ def build_tools(config: ToolConfig) -> list:
                 f"{doctor} doesn't have {req} open on {date}. "
                 f"The nearest open times are {', '.join(nearest)}. "
                 "Would any of those work?"
+            )
+
+        # Phase 10: clinic-local WINDOW ("between 4 and 5", "morning"). Report the
+        # slots open INSIDE the window, plus the nearest open slot just outside
+        # each edge, so a caller who only knows roughly when they want can still
+        # be offered a real near-neighbour time without the day being dumped.
+        if data.get("window"):
+            win = data["window"]
+            edge = lambda t: _fmt_time_12h(t) if t else None
+            inside = [_fmt_time_12h(t) for t in (data.get("openInWindow") or [])]
+            if not inside:
+                before, after = edge(data.get("nearestBefore")), edge(data.get("nearestAfter"))
+                bits = [p for p in (before, after) if p]
+                if not bits:
+                    return f"{doctor} has no open times in that window on {date}."
+                return (
+                    f"{doctor} has nothing open between {edge(win.get('from')) or 'the start'} "
+                    f"and {edge(win.get('to')) or 'the end'} on {date}. "
+                    f"That window is fully closed."
+                )
+            shown = ", ".join(inside)
+            before = data.get("nearestBefore")
+            after = data.get("nearestAfter")
+            extra = []
+            if before:
+                extra.append(f"closest before is {_fmt_time_12h(before)}")
+            if after:
+                extra.append(f"closest after is {_fmt_time_12h(after)}")
+            suffix = (" — " + ", ".join(extra)) if extra else ""
+            return (
+                f"Between {edge(win.get('from')) or 'open of day'} and "
+                f"{edge(win.get('to')) or 'end of day'} on {date}, {doctor} has "
+                f"{shown} open{suffix}."
             )
 
         # No specific time asked: offer a few times and invite the caller to pick.

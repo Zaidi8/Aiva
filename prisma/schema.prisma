@@ -117,6 +117,11 @@ model Clinic {
   // receptionist runtime resolves a clinic from the inbound `to` number via
   // this field (must be unique).
   voicePhone String?  @unique @map("voice_phone")
+  // Opening hours as [{ dayOfWeek: 0=Sun..6, startTime: "HH:mm", endTime:
+  // "HH:mm" }] in the clinic timezone. Rendered into the AI receptionist's
+  // prompt so it answers "what time do you open/close / are you open Sunday"
+  // from real data instead of guessing. Empty/null = hours not on file.
+  openingHours Json?  @map("opening_hours")
   // IANA tz name. Source of truth for "9am means what" — drives all
   // appointment scheduling, schedule editor, and reminder dispatch logic.
   timezone  String   @default("Asia/Karachi") @map("timezone")
@@ -202,6 +207,10 @@ model Doctor {
   specialization String
   email          String?  @unique
   phone          String?
+  // Full years of professional practice. Drives the AI receptionist's doctor
+  // recommendation: when a caller asks for a specialty without a preferred
+  // doctor, it suggests the senior-most (most experienced) match.
+  experienceYears Int?    @map("experience_years")
   // DEPRECATED: use DoctorSchedule and DoctorTimeOff. Will be dropped after Chat B migration.
   availableSlots Json?    @map("available_slots") // [{day, start, end}, ...]
   // DEPRECATED: use DoctorSchedule and DoctorTimeOff. Will be dropped after Chat B migration.
