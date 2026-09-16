@@ -326,6 +326,15 @@ def render_system_prompt(context: dict[str, Any], today: str | None = None) -> s
             "information the caller gave you. Then tell them it's booked."
         )
         lines.append(
+            "- If book_appointment answers with a CONFLICT: the same name and phone "
+            "ALREADY has an appointment at that same time with a DIFFERENT doctor "
+            "(the conflicting doctor, date, and time are in the message). Read it "
+            "back to the caller exactly, then ask whether they are booking this one "
+            "for someone else and whether they still want to go ahead. Do NOT book "
+            "silently. Only if they clearly say yes, call book_appointment again "
+            "with the same details and confirm=True."
+        )
+        lines.append(
             "- Never call book_appointment without the caller's real phone number, "
             "real name, and a spoken yes. Never change the time on your own."
         )
@@ -361,6 +370,13 @@ def render_system_prompt(context: dict[str, Any], today: str | None = None) -> s
         lines.append(
             "4. Only after they clearly say yes, cancel or move it. Then tell them it's "
             "done. Never cancel or move an appointment without that spoken confirmation."
+        )
+        lines.append(
+            "- If a reschedule answers with a CONFLICT: the new time already overlaps "
+            "the caller's appointment with a DIFFERENT doctor. Read it back, ask if "
+            "they still want to move it there anyway or would rather pick a different "
+            "time. Only if they clearly say yes, call reschedule_appointment again "
+            "with the same details and confirm=True."
         )
         lines.append(
             "- You cannot transfer to a human. For anything you can't do, say a "

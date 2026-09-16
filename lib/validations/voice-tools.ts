@@ -84,6 +84,11 @@ const phone = z.string().trim().min(3, "phone is required.").max(32);
 // date + "HH:mm" time (clinic-local), the caller's phone, and — for a first-time
 // caller — their name. patientName is optional: existing callers are matched by
 // phone, and a missing name falls back to a placeholder.
+//
+// `confirm` is the caller's spoken acceptance of a same-time conflict warning
+// (Phase 11). When the same patient already has a non-cancelled appointment that
+// overlaps the requested slot under a DIFFERENT doctor, the endpoint refuses
+// with `reason: "conflict"` until the agent confirms on the caller's behalf.
 export const voiceBookBodySchema = z.object({
   clinicId: z.string().min(1, "clinicId is required."),
   doctorName,
@@ -91,6 +96,7 @@ export const voiceBookBodySchema = z.object({
   time: clockTime,
   phone,
   patientName: z.string().trim().min(1).max(120).optional(),
+  confirm: z.boolean().optional(),
 });
 
 // Phase 6 cancel (write). Identifies the appointment by the caller's phone plus
@@ -107,6 +113,10 @@ export const voiceCancelBodySchema = z.object({
 // Phase 6 reschedule (write). Same identity fields as cancel (doctor + current
 // date/time + phone) plus the NEW clinic-local date/time to move it to. The
 // doctor stays the same; the new slot is validated against the schedule grid.
+//
+// `confirm` (Phase 11) behaves like booking: the endpoint refuses to move the
+// appointment onto a time that overlaps another of this patient's appointments
+// with a different doctor unless the agent confirms on the caller's behalf.
 export const voiceRescheduleBodySchema = z.object({
   clinicId: z.string().min(1, "clinicId is required."),
   doctorName,
@@ -115,6 +125,7 @@ export const voiceRescheduleBodySchema = z.object({
   newDate: calendarDate,
   newTime: clockTime,
   phone,
+  confirm: z.boolean().optional(),
 });
 
 export type VoiceDoctorsQuery = z.infer<typeof voiceDoctorsQuerySchema>;

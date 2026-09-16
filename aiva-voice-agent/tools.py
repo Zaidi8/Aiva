@@ -396,11 +396,15 @@ def build_tools(config: ToolConfig) -> list:
         time: str,
         phone: str,
         patient_name: str = "",
+        confirm: bool = False,
     ) -> str:
         """Book an appointment. WRITES. Call only after the slot is confirmed open
         and the caller said yes to a read-back. `date` YYYY-MM-DD, `time` "HH:mm"
         matching an open slot, `phone` the caller's number, `patient_name` their
-        full name (needed for a first-time caller)."""
+        full name (needed for a first-time caller). If the backend answers with a
+        `conflict`, the caller already has a same-time appointment with a different
+        doctor — read it back, ask if this is for someone else, and only re-call
+        with `confirm` set to True after they say yes."""
         import re
         _say_filler(context, "Okay, booking that now.")
         # Safety net: reject empty / obviously fake phone numbers.
@@ -415,6 +419,7 @@ def build_tools(config: ToolConfig) -> list:
             "date": date,
             "time": time,
             "phone": phone,
+            "confirm": bool(confirm),
         }
         if patient_name.strip():
             body["patientName"] = patient_name.strip()
@@ -437,6 +442,24 @@ def build_tools(config: ToolConfig) -> list:
             return f"There are a few matching doctors: {names}. Which one did you mean?"
         if reason == "not_found":
             return f"I couldn't find a doctor named {doctor_name}."
+        if reason == "conflict":
+            # Same patient already has a same-time appointment with a different
+            # doctor. Read it back so the caller can decide whether to proceed.
+            parts = []
+            for c in data.get("conflicts") or []:
+                parts.append(
+                    f"{c.get('doctor')} on {c.get('date')} at {c.get('time')}"
+                )
+            if not parts:
+                return (
+                    f"It looks like {patient_name.strip() or 'this patient'} already has "
+                    "an appointment at that time. Do you still want to book this one?"
+                )
+            return (
+                "I see this name and number already have an appointment at that "
+                f"same time — {', '.join(parts)}. Are you booking this one for "
+                "someone else, and do you still want to go ahead?"
+            )
         if reason == "slot_taken":
             return "Sorry, that time was just taken. Would you like another time?"
         # slot_unavailable
@@ -488,12 +511,16 @@ def build_tools(config: ToolConfig) -> list:
         new_date: str,
         new_time: str,
         phone: str,
+        confirm: bool = False,
     ) -> str:
         """Move one of the caller's appointments to a new time (same doctor).
         WRITES. Call only after you looked it up, confirmed the NEW time is open,
         read the move back, and the caller said yes. `date`/`time` are the CURRENT
         date (YYYY-MM-DD) and time ("HH:mm"); `new_date`/`new_time` the new ones;
-        `phone` the number it's under."""
+        `phone` the number it's under. If the backend answers with a `conflict`,
+        the new time clashes with the caller's existing appointment under a
+        different doctor — read it back and only re-call with `confirm` set to
+        True after they say they want it anyway."""
         _say_filler(context, "Okay, let me move that for you.")
         data = await _post(
             config,
@@ -505,6 +532,7 @@ def build_tools(config: ToolConfig) -> list:
                 "newDate": new_date,
                 "newTime": new_time,
                 "phone": phone,
+                "confirm": bool(confirm),
             },
         )
         if data is None:
@@ -523,6 +551,22 @@ def build_tools(config: ToolConfig) -> list:
             return (
                 f"I couldn't find an appointment with {doctor_name} on {date} at {time} "
                 f"under {phone}. Could you double-check those details?"
+            )
+        if reason == "conflict":
+            parts = []
+            for c in data.get("conflicts") or []:
+                parts.append(
+                    f"{c.get('doctor')} on {c.get('date')} at {c.get('time')}"
+                )
+            if not parts:
+                return (
+                    "That new time already overlaps another appointment under this "
+                    "number. Do you still want to move it there?"
+                )
+            return (
+                "That new time clashes with an appointment this number already "
+                f"has — {', '.join(parts)}. Do you still want to move it there "
+                "anyway, or pick a different time?"
             )
         if reason == "slot_taken":
             return f"Sorry, {new_time} on {new_date} was just taken. Want to pick another time?"

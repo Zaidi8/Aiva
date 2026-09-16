@@ -8,6 +8,7 @@ import type {
 } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { clinicWhere } from "@/lib/clinic-scope";
+import { normalizePhone } from "@/lib/voice/phone";
 import { localWallClockToInstant, toLocalDate } from "@/lib/voice/tz";
 
 export interface ListAppointmentsOptions {
@@ -104,6 +105,132 @@ export async function listUpcomingAppointmentsByPatients(
     },
   });
   return items as AppointmentWithRelations[];
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Patient-level time-conflict detection (Phase 11)
+//
+// The DB's @@unique([doctorId, scheduledAt]) guard stops the SAME doctor being
+// double-booked at one instant, but it says nothing about one patient holding
+// two appointments at the same time with DIFFERENT doctors. This helper finds
+// non-cancelled appointments belonging to a phone number that OVERLAP a
+// candidate instant window [from, to) (cross-doctor only, optionally excluding
+// one appointment id — used by reschedule so the appointment being MOVED doesn't
+// count as a conflict with itself).
+//
+// Overlap definition: an existing appointment occupies [scheduledAt,
+// scheduledAt + durationMin). Two intervals overlap when each starts strictly
+// before the other ends. A wider fetch window (±1 day) is filtered precisely in
+// JS so we never rely on SQL date arithmetic.
+// ────────────────────────────────────────────────────────────────────────────
+
+export interface PatientConflict {
+  appointmentId: string;
+  patientId: string;
+  doctorId: string;
+  doctorName: string;
+  scheduledAt: Date;
+  durationMin: number;
+  status: string;
+}
+
+async function findPatientTimeConflictsForIds(
+  staff: Pick<ClinicStaff, "clinicId">,
+  args: {
+    patientIds: string[];
+    from: Date; // candidate slot start (true instant)
+    to: Date; // candidate slot end (true instant)
+    excludeAppointmentId?: string;
+  },
+): Promise<PatientConflict[]> {
+  if (args.patientIds.length === 0) return [];
+
+  const paddingDay = 24 * 60 * 60 * 1000;
+  const candidates = await prisma.appointment.findMany({
+    where: {
+      ...clinicWhere(staff),
+      patientId: { in: args.patientIds },
+      status: { in: ["Pending", "Confirmed"] },
+      scheduledAt: {
+        gte: new Date(args.from.getTime() - paddingDay),
+        lt: new Date(args.to.getTime() + paddingDay),
+      },
+    },
+    select: {
+      id: true,
+      patientId: true,
+      scheduledAt: true,
+      durationMin: true,
+      status: true,
+      doctorId: true,
+      doctor: { select: { name: true } },
+    },
+  });
+
+  const conflicts: PatientConflict[] = [];
+  for (const a of candidates) {
+    if (args.excludeAppointmentId && a.id === args.excludeAppointmentId) continue;
+    const existingEnd = a.scheduledAt.getTime() + a.durationMin * 60 * 1000;
+    const overlaps =
+      a.scheduledAt.getTime() < args.to.getTime() && existingEnd > args.from.getTime();
+    if (!overlaps) continue;
+    conflicts.push({
+      appointmentId: a.id,
+      patientId: a.patientId,
+      doctorId: a.doctorId,
+      doctorName: a.doctor.name,
+      scheduledAt: a.scheduledAt,
+      durationMin: a.durationMin,
+      status: a.status,
+    });
+  }
+  // Oldest-first for a stable spoken order.
+  return conflicts.sort((x, y) => x.scheduledAt.getTime() - y.scheduledAt.getTime());
+}
+
+export async function findPatientTimeConflicts(
+  staff: Pick<ClinicStaff, "clinicId">,
+  args: {
+    phone: string;
+    from: Date; // candidate slot start (true instant)
+    to: Date; // candidate slot end (true instant)
+    excludeAppointmentId?: string;
+  },
+): Promise<PatientConflict[]> {
+  const patients = await prisma.patient.findMany({
+    // Phone numbers are stored normalized; normalize the lookup input too so a
+    // caller's "as-typed" number matches their existing patient record.
+    where: { clinicId: staff.clinicId, phoneNumber: normalizePhone(args.phone) },
+    select: { id: true },
+  });
+  return findPatientTimeConflictsForIds(staff, {
+    patientIds: patients.map((p) => p.id),
+    from: args.from,
+    to: args.to,
+    excludeAppointmentId: args.excludeAppointmentId,
+  });
+}
+
+export async function findPatientTimeConflictsByIds(
+  staff: Pick<ClinicStaff, "clinicId">,
+  args: {
+    patientIds: string[];
+    from: Date; // candidate slot start (true instant)
+    to: Date; // candidate slot end (true instant)
+    doctorId: string; // the doctor being booked — a conflict only exists cross-doctor
+    excludeAppointmentId?: string;
+  },
+): Promise<PatientConflict[]> {
+  const conflicts = await findPatientTimeConflictsForIds(staff, {
+    patientIds: args.patientIds,
+    from: args.from,
+    to: args.to,
+    excludeAppointmentId: args.excludeAppointmentId,
+  });
+  // Booking/rescheduling with the SAME doctor is handled by the per-doctor
+  // unique constraint; only same-time appointments under a DIFFERENT doctor are
+  // a patient-level conflict.
+  return conflicts.filter((c) => c.doctorId !== args.doctorId);
 }
 
 // ────────────────────────────────────────────────────────────────────────────

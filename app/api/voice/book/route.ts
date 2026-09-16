@@ -13,7 +13,10 @@ import { mapPrismaError } from "@/lib/api/prisma-errors";
 import { prisma } from "@/lib/prisma";
 import { listActiveDoctors } from "@/lib/doctors/queries";
 import { matchDoctor } from "@/lib/voice/doctor-match";
-import { computeAvailability } from "@/lib/appointments/queries";
+import {
+  computeAvailability,
+  findPatientTimeConflicts,
+} from "@/lib/appointments/queries";
 import {
   bookAppointmentForVoice,
   SlotTakenError,
@@ -37,7 +40,8 @@ export const POST = withWebhookSecret(async (req) => {
   }
   const parsed = voiceBookBodySchema.safeParse(body);
   if (!parsed.success) return failValidation(parsed.error);
-  const { clinicId, doctorName, date, time, phone, patientName } = parsed.data;
+  const { clinicId, doctorName, date, time, phone, patientName, confirm } =
+    parsed.data;
   const staff = { clinicId };
 
   try {
@@ -95,6 +99,32 @@ export const POST = withWebhookSecret(async (req) => {
         (new Date(slot.end).getTime() - new Date(slot.start).getTime()) / 60_000,
       ),
     );
+
+    // Phase 11 — patient-level conflict guard. The DB unique constraint is per
+    // doctor, so the SAME patient could otherwise hold two appointments at the
+    // same clock time with different doctors. Unless the caller has explicitly
+    // confirmed (confirm=true, spoken after hearing the warning), refuse and
+    // return the conflicting appointment(s) for the agent to read back. A
+    // same-doctor overlap here is either the caller's own idempotent re-book or
+    // someone else's slot-taken — both handled downstream, NOT a conflict.
+    const conflicts = await findPatientTimeConflicts(staff, {
+      phone,
+      from: scheduledAt,
+      to: new Date(scheduledAt.getTime() + durationMin * 60_000),
+    });
+    if (conflicts.some((c) => c.doctorId !== doctor.id) && !confirm) {
+      const cross = conflicts.filter((c) => c.doctorId !== doctor.id);
+      return ok({
+        booked: false,
+        reason: "conflict",
+        conflicts: cross.map((c) => ({
+          doctor: c.doctorName,
+          date: toLocalDate(c.scheduledAt, clinic.timezone),
+          time: toLocalTime(c.scheduledAt, clinic.timezone),
+          status: c.status,
+        })),
+      });
+    }
 
     // Write. Patient created here if the phone is new.
     const { appointment, idempotent } = await bookAppointmentForVoice(staff, {

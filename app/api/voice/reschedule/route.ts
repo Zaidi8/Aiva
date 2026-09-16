@@ -12,7 +12,10 @@ import { mapPrismaError } from "@/lib/api/prisma-errors";
 import { prisma } from "@/lib/prisma";
 import { listActiveDoctors } from "@/lib/doctors/queries";
 import { matchDoctor } from "@/lib/voice/doctor-match";
-import { computeAvailability } from "@/lib/appointments/queries";
+import {
+  computeAvailability,
+  findPatientTimeConflicts,
+} from "@/lib/appointments/queries";
 import { rescheduleAppointmentForVoice } from "@/lib/appointments/mutations";
 import {
   localWallClockToInstant,
@@ -33,7 +36,7 @@ export const POST = withWebhookSecret(async (req) => {
   }
   const parsed = voiceRescheduleBodySchema.safeParse(body);
   if (!parsed.success) return failValidation(parsed.error);
-  const { clinicId, doctorName, date, time, newDate, newTime, phone } =
+  const { clinicId, doctorName, date, time, newDate, newTime, phone, confirm } =
     parsed.data;
   const staff = { clinicId };
 
@@ -94,6 +97,31 @@ export const POST = withWebhookSecret(async (req) => {
         (new Date(slot.end).getTime() - new Date(slot.start).getTime()) / 60_000,
       ),
     );
+
+    // Phase 11 — patient-level conflict guard for moves. Moving onto a time that
+    // overlaps ANOTHER of this patient's appointments (different doctor) is the
+    // same double-booking hazard as a fresh cross-doctor booking. Refuse until
+    // the caller has heard the warning and confirmed. Same-doctor overlaps are
+    // the appointment being moved / a slot-taken guard downstream — not conflicts.
+    const conflicts = (
+      await findPatientTimeConflicts(staff, {
+        phone,
+        from: toScheduledAt,
+        to: new Date(toScheduledAt.getTime() + durationMin * 60_000),
+      })
+    ).filter((c) => c.doctorId !== doctor.id);
+    if (conflicts.length > 0 && !confirm) {
+      return ok({
+        rescheduled: false,
+        reason: "conflict",
+        conflicts: conflicts.map((c) => ({
+          doctor: c.doctorName,
+          date: toLocalDate(c.scheduledAt, clinic.timezone),
+          time: toLocalTime(c.scheduledAt, clinic.timezone),
+          status: c.status,
+        })),
+      });
+    }
 
     const result = await rescheduleAppointmentForVoice(staff, {
       phone,

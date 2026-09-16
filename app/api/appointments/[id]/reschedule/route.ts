@@ -6,9 +6,11 @@ import {
   ok,
   failNotFound,
   failValidation,
+  fail,
 } from "@/lib/api/response";
 import { mapPrismaError } from "@/lib/api/prisma-errors";
 import { rescheduleAppointment } from "@/lib/appointments/mutations";
+import { PatientConflictError } from "@/lib/appointments/mutations";
 import { rescheduleAppointmentSchema } from "@/lib/validations/appointment";
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -29,6 +31,18 @@ export const POST = withApiCan<Ctx>(["appointment:write"])(async (
     if (!appt) return failNotFound("Appointment");
     return ok(appt);
   } catch (e) {
+    if (e instanceof PatientConflictError) {
+      return fail(
+        "PATIENT_CONFLICT",
+        e.message,
+        409,
+        {
+          conflicts: e.conflicts.map(
+            (c) => `${c.doctorName} on ${c.date} at ${c.time}`,
+          ),
+        },
+      );
+    }
     const mapped = mapPrismaError(e);
     if (mapped) return mapped;
     throw e;

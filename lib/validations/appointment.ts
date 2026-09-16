@@ -14,6 +14,10 @@ export const createAppointmentSchema = z.object({
   type: z.nativeEnum(AppointmentType),
   status: z.nativeEnum(AppointmentStatus).optional(),
   notes: z.string().trim().max(2000).optional(),
+  // Set by the UI after the user hears/reads the cross-doctor conflict warning
+  // and opts to book anyway. Without it, a same-time appointment under another
+  // doctor for the same patient is refused with 409 PATIENT_CONFLICT.
+  confirm: z.boolean().optional(),
 });
 
 // Update intentionally cannot move (patientId, doctorId, scheduledAt) — that
@@ -31,6 +35,8 @@ export const rescheduleAppointmentSchema = z.object({
     .string()
     .datetime({ offset: true, message: "scheduledAt must be ISO 8601 with timezone." }),
   durationMin: z.coerce.number().int().min(5).max(480).optional(),
+  // Same "I read the conflict warning and want to proceed anyway" flag.
+  confirm: z.boolean().optional(),
 });
 
 export type CreateAppointmentInput = z.infer<typeof createAppointmentSchema>;

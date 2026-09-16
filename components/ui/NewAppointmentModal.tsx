@@ -14,7 +14,9 @@
 //
 // Submission POSTs to /api/appointments. The DB has a unique constraint on
 // (doctorId, scheduledAt); collisions surface as 409 from the API and we
-// translate to a friendly inline error on the time picker.
+// translate to a friendly inline error on the time picker. A 409
+// PATIENT_CONFLICT (same patient, same time, DIFFERENT doctor) instead shows a
+// warning panel and lets the user opt to book anyway — matching the voice agent.
 
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './dialog';
 import { Button } from './button';
@@ -114,6 +116,10 @@ export function NewAppointmentModal({
   const [notes, setNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  // Set when the API returns 409 PATIENT_CONFLICT — the patient already has an
+  // appointment at the same time with another doctor. Shown as a warning panel;
+  // "book anyway" re-submits with confirm: true (same as the voice agent flow).
+  const [conflictLines, setConflictLines] = useState<string[] | null>(null);
 
   // Reset everything when the modal closes.
   useEffect(() => {
@@ -128,6 +134,7 @@ export function NewAppointmentModal({
       setSelectedType('');
       setNotes('');
       setErrors({});
+      setConflictLines(null);
     }
   }, [isOpen]);
 
@@ -222,6 +229,7 @@ export function NewAppointmentModal({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrors({});
+    setConflictLines(null);
 
     const nextErrors: Record<string, string> = {};
     if (!selectedPatient) nextErrors.patientId = 'Pick a patient.';
@@ -233,6 +241,10 @@ export function NewAppointmentModal({
       return;
     }
 
+    await submitBooking(false);
+  };
+
+  const submitBooking = async (confirmed: boolean) => {
     setSubmitting(true);
     try {
       await apiPost('/api/appointments', {
@@ -241,13 +253,21 @@ export function NewAppointmentModal({
         scheduledAt: selectedSlot,
         type: selectedType,
         notes: notes.trim() || undefined,
+        ...(confirmed ? { confirm: true } : {}),
       });
       toast.success('Appointment added.');
       onCreated?.();
       onClose();
     } catch (err) {
       if (err instanceof ApiError) {
-        if (err.status === 409) {
+        if (err.status === 409 && err.fields?.conflicts) {
+          // Same patient, same time, different doctor — warn and offer to book
+          // anyway, mirroring what the voice agent does on the phone.
+          setConflictLines(err.fields.conflicts);
+          toast.warning(
+            'This patient already has an appointment at that time with another doctor.',
+          );
+        } else if (err.status === 409) {
           setErrors({
             slot: 'That slot was just booked by someone else. Pick another time.',
           });
@@ -506,31 +526,69 @@ export function NewAppointmentModal({
             />
           </div>
 
-          <div className="flex gap-3 pt-4">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={onClose}
-              className="flex-1"
-              disabled={submitting}
-            >
-              Cancel
-            </Button>
-            <Button
-              type="submit"
-              disabled={submitting || doctorEmpty}
-              className="flex-1"
-            >
-              {submitting ? (
-                'Creating…'
-              ) : (
-                <>
-                  <Check />
-                  Create appointment
-                </>
-              )}
-            </Button>
-          </div>
+          {conflictLines ? (
+            <div className="space-y-3 pt-4">
+              <div className="rounded-lg border border-warning bg-warning-muted px-3 py-2.5 text-xs">
+                <p className="font-medium text-warning-muted-foreground">
+                  This patient already has an appointment at the same time with
+                  another doctor:
+                </p>
+                <ul className="mt-1 list-disc pl-4 text-warning-muted-foreground">
+                  {conflictLines.map((line) => (
+                    <li key={line}>{line}</li>
+                  ))}
+                </ul>
+                <p className="mt-1 text-warning-muted-foreground">
+                  Book anyway? This will leave the patient double-booked.
+                </p>
+              </div>
+              <div className="flex gap-3">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setConflictLines(null)}
+                  className="flex-1"
+                  disabled={submitting}
+                >
+                  Pick another time
+                </Button>
+                <Button
+                  type="button"
+                  onClick={() => submitBooking(true)}
+                  className="flex-1"
+                  disabled={submitting}
+                >
+                  {submitting ? 'Booking…' : 'Book anyway'}
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex gap-3 pt-4">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={onClose}
+                className="flex-1"
+                disabled={submitting}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                disabled={submitting || doctorEmpty}
+                className="flex-1"
+              >
+                {submitting ? (
+                  'Creating…'
+                ) : (
+                  <>
+                    <Check />
+                    Create appointment
+                  </>
+                )}
+              </Button>
+            </div>
+          )}
         </form>
       </DialogContent>
     </Dialog>

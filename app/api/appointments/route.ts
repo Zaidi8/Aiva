@@ -14,6 +14,7 @@ import { listAppointments } from "@/lib/appointments/queries";
 import {
   createAppointment,
   AppointmentFkError,
+  PatientConflictError,
 } from "@/lib/appointments/mutations";
 import { createAppointmentSchema } from "@/lib/validations/appointment";
 import { doctorScope } from "@/lib/role-scope";
@@ -65,6 +66,18 @@ export const POST = withApiCan(["appointment:write"])(async (
       return fail("VALIDATION_FAILED", e.message, 422, {
         [e.field]: [e.message],
       });
+    }
+    if (e instanceof PatientConflictError) {
+      return fail(
+        "PATIENT_CONFLICT",
+        e.message,
+        409,
+        {
+          conflicts: e.conflicts.map(
+            (c) => `${c.doctorName} on ${c.date} at ${c.time}`,
+          ),
+        },
+      );
     }
     const mapped = mapPrismaError(e);
     if (mapped) return mapped;

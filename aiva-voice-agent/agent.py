@@ -312,8 +312,13 @@ class CallLogger:
 #
 # If the caller never speaks ("are you still there?" loop goes infinite), the
 # base turn-detector leaves the agent waiting indefinitely. This watchdog arms a
-# timer each time it becomes the caller's turn (agent finished speaking and is
-# listening) and escalates in steps if no speech arrives:
+# timer ONLY when the agent is truly idle (listening/idle state) AND the
+# transition was from a busy state (speaking/thinking → listening). This
+# prevents the timer from firing while the agent is still mid-tool-call or mid-
+# speech-fillers — a critical distinction for a tool-using agent where the agent
+# can be "listening" between intermediate turns while still actively processing.
+#
+# Escalation steps:
 #   stage 0: silence → gentle prompt ("Are you still there?")
 #   stage 1: silence → firmer nudge ("I'm having trouble hearing you …")
 #   stage 2: silence → graceful goodbye, then hang up.
@@ -336,6 +341,13 @@ _GOODBYE = (
 class SilenceEscalation:
     """Watchdog that interrupts dead air with escalating prompts, then hangs up.
 
+    State-machine approach: the countdown only runs when the agent has finished
+    ALL speech (including post-tool-call replies) and is truly idle waiting on the
+    caller. The key insight: LiveKit's agent_state transitions to "listening"
+    briefly between a filler and a tool call, so the old code armed the 7-second
+    timer during the agent's own active turn — causing an immediate
+    "are you still there?" the moment the agent finished its real reply.
+
     Interface used by entrypoint:
       - `install(session, shutdown_fnc)` — register event handlers + start the loop.
       - `close()` — cancel the loop (e.g. on close/participant-disconnect).
@@ -344,17 +356,30 @@ class SilenceEscalation:
     def __init__(self) -> None:
         self._session: AgentSession | None = None
         self._shutdown_fnc: Callable[[], None] | None = None
-        self._arm = asyncio.Event()  # set when it's the caller's turn to speak
+        # Edge-triggered events based on agent state transitions:
+        # - _idle_event: set on busy→idle transition; the loop consumes it to start the countdown.
+        # - _busy_event: set on idle→busy transition; aborts an active countdown.
+        self._idle_event = asyncio.Event()
+        self._busy_event = asyncio.Event()
         self._speech = asyncio.Event()  # set when VAD detects caller speech
         self._task: asyncio.Task[None] | None = None
         self._stage = 0  # 0 = none spoken, 1/2 = prompted, 3+ = hang up
+        # Start busy=True so the first idle transition (after greeting) arms the timer.
+        self._agent_busy = True
 
     # -- event handlers (registered on the AgentSession) ---------------------
     def on_agent_state(self, event: object) -> None:
-        # The agent finished its turn and is now waiting for the caller.
         new_state = getattr(event, "new_state", None)
-        if new_state in ("listening", "idle"):
-            self._arm.set()
+        if new_state in ("speaking", "thinking", "initializing"):
+            # Agent is or will be active — abort any in-flight countdown.
+            if not self._agent_busy:
+                self._agent_busy = True
+                self._busy_event.set()
+        elif new_state in ("listening", "idle"):
+            # Agent finished and is now waiting for the caller.
+            if self._agent_busy:
+                self._agent_busy = False
+                self._idle_event.set()
 
     def on_user_state(self, event: object) -> None:
         # Caller is making a sound — cancel the current silence timer.
@@ -391,34 +416,55 @@ class SilenceEscalation:
     async def _run(self) -> None:
         try:
             while True:
-                # Wait until it's the caller's turn (agent is listening/idle).
-                await self._arm.wait()
-                self._arm.clear()
+                # Wait for the edge transition: agent was busy, now truly idle.
+                await self._idle_event.wait()
+                self._idle_event.clear()
+                self._busy_event.clear()
+                self._speech.clear()
 
+                # Start the countdown. We race the speech VAD event (caller spoke)
+                # against the busy event (agent is active again) against a timeout.
                 speech_task = asyncio.create_task(self._speech.wait())
+                busy_task = asyncio.create_task(self._busy_event.wait())
                 try:
-                    await asyncio.wait_for(speech_task, _SILENCE_TIMEOUT_S)
-                    # Caller spoke — a normal conversation is happening. Reset the
-                    # escalation and wait for the agent's next finished turn.
-                    self._stage = 0
-                    self._speech.clear()
-                    continue
-                except asyncio.TimeoutError:
-                    pass  # no speech in the window — escalate below
+                    done, _ = await asyncio.wait(
+                        {speech_task, busy_task},
+                        timeout=_SILENCE_TIMEOUT_S,
+                    )
                 finally:
                     if not speech_task.done():
                         speech_task.cancel()
-                    self._speech.clear()
+                    if not busy_task.done():
+                        busy_task.cancel()
 
-                # Dead air. Escalate step by step.
+                if busy_task in done:
+                    # Agent started speaking/thinking again (tool call producing a
+                    # final reply, interruption, etc.) — this listening window was
+                    # never truly idle. Discard and wait for the next idle edge.
+                    self._busy_event.clear()
+                    self._speech.clear()
+                    continue
+
+                if speech_task in done:
+                    # Caller spoke — normal conversation happening. Reset escalation.
+                    self._stage = 0
+                    self._speech.clear()
+                    continue
+
+                # No speech, no agent activity → dead air. Escalate step by step.
                 if self._stage < _SILENCE_MAX_PROMPTS:
                     self._stage += 1
-                    await self._speak(_PROMPT_STILL_THERE if self._stage == 1 else _PROMPT_TROUBLE)
-                    # After the prompt, it's the caller's turn again.
-                    self._arm.set()
+                    await self._speak(
+                        _PROMPT_STILL_THERE if self._stage == 1 else _PROMPT_TROUBLE
+                    )
+                    # _speak itself transitions agent→speaking→listening; the next
+                    # idle edge will re-arm the countdown naturally.
                 else:
                     await self._speak(_GOODBYE)
-                    logger.info("Silence escalation reached stage %d — hanging up.", self._stage)
+                    logger.info(
+                        "Silence escalation reached stage %d — hanging up.",
+                        self._stage,
+                    )
                     if self._shutdown_fnc is not None:
                         self._shutdown_fnc()
                     return

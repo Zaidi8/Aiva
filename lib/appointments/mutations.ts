@@ -10,11 +10,34 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { clinicWhere } from "@/lib/clinic-scope";
 import { normalizePhone } from "@/lib/voice/phone";
+import { toLocalDate, toLocalTime } from "@/lib/voice/tz";
+import { findPatientTimeConflictsByIds } from "@/lib/appointments/queries";
 import type {
   CreateAppointmentInput,
   UpdateAppointmentInput,
   RescheduleAppointmentInput,
 } from "@/lib/validations/appointment";
+
+// Thrown when the same patient would hold two appointments that OVERLAP in time
+// under different doctors. The DB's @@unique([doctorId, scheduledAt]) guard only
+// stops a single doctor being double-booked; a patient sitting in two chairs at
+// once is an operational error the API must catch BEFORE writing. Carries
+// formatted conflict lines (clinic-local dates) for the frontend warning panel.
+export class PatientConflictError extends Error {
+  constructor(
+    public conflicts: {
+      doctorName: string;
+      date: string; // YYYY-MM-DD, clinic-local
+      time: string; // HH:mm, clinic-local
+      status: string;
+    }[],
+  ) {
+    super(
+      "This patient already has an appointment at the same time with another doctor.",
+    );
+    this.name = "PatientConflictError";
+  }
+}
 
 export async function createAppointment(
   staff: Pick<ClinicStaff, "clinicId">,
@@ -41,15 +64,21 @@ export async function createAppointment(
     );
   }
 
+  const { confirm, ...data } = input;
+
+  await assertNoPatientTimeConflict(staff, {
+    patientIds: [input.patientId],
+    doctorId: input.doctorId,
+    from: new Date(input.scheduledAt),
+    durationMin: data.durationMin ?? 30,
+    confirmed: confirm ?? false,
+  });
+
   return prisma.appointment.create({
     data: {
-      patientId: input.patientId,
-      doctorId: input.doctorId,
-      scheduledAt: new Date(input.scheduledAt),
-      durationMin: input.durationMin,
-      type: input.type,
-      status: input.status ?? "Pending",
-      notes: input.notes,
+      ...data,
+      scheduledAt: new Date(data.scheduledAt),
+      status: data.status ?? "Pending",
       clinicId: staff.clinicId,
     },
   });
@@ -77,16 +106,68 @@ export async function rescheduleAppointment(
   // the unique constraint check happens on the right tenant.
   const existing = await prisma.appointment.findFirst({
     where: { id, ...clinicWhere(staff) },
-    select: { id: true },
+    select: { id: true, doctorId: true, patientId: true },
   });
   if (!existing) return null;
+
+  const { confirm, ...data } = input;
+
+  // Skip the patient-level conflict check when the appointment isn't moving in
+  // time (idempotent re-ask) — it can't collide with anything new.
+  await assertNoPatientTimeConflict(staff, {
+    patientIds: [existing.patientId],
+    doctorId: existing.doctorId,
+    from: new Date(data.scheduledAt),
+    durationMin: data.durationMin ?? 30,
+    excludeAppointmentId: existing.id,
+    confirmed: confirm ?? false,
+  });
+
   return prisma.appointment.update({
     where: { id: existing.id },
     data: {
-      scheduledAt: new Date(input.scheduledAt),
-      ...(input.durationMin ? { durationMin: input.durationMin } : {}),
+      scheduledAt: new Date(data.scheduledAt),
+      ...(data.durationMin ? { durationMin: data.durationMin } : {}),
     },
   });
+}
+
+async function assertNoPatientTimeConflict(
+  staff: Pick<ClinicStaff, "clinicId">,
+  args: {
+    patientIds: string[];
+    doctorId: string;
+    from: Date;
+    durationMin: number;
+    excludeAppointmentId?: string;
+    confirmed?: boolean; // set after the user has seen the warning and opted to proceed
+  },
+): Promise<void> {
+  if (args.confirmed) return; // explicit user approval — book anyway.
+  const conflicts = await findPatientTimeConflictsByIds(staff, {
+    patientIds: args.patientIds,
+    from: args.from,
+    to: new Date(args.from.getTime() + args.durationMin * 60_000),
+    doctorId: args.doctorId,
+    excludeAppointmentId: args.excludeAppointmentId,
+  });
+  if (conflicts.length === 0) return;
+
+  // Format each conflicting appointment's time in the clinic's local timezone
+  // so the frontend can render a human-friendly warning panel.
+  const clinic = await prisma.clinic.findUnique({
+    where: { id: staff.clinicId },
+    select: { timezone: true },
+  });
+  const tz = clinic?.timezone ?? "UTC";
+  throw new PatientConflictError(
+    conflicts.map((c) => ({
+      doctorName: c.doctorName,
+      date: toLocalDate(c.scheduledAt, tz),
+      time: toLocalTime(c.scheduledAt, tz),
+      status: c.status,
+    })),
+  );
 }
 
 export async function cancelAppointment(
