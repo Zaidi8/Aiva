@@ -12,7 +12,11 @@ import { clinicWhere } from "@/lib/clinic-scope";
 import { normalizePhone } from "@/lib/voice/phone";
 import { toLocalDate, toLocalTime } from "@/lib/voice/tz";
 import { findPatientTimeConflictsByIds } from "@/lib/appointments/queries";
-import { dispatchAppointmentConfirmationSms } from "@/lib/notifications/mutations";
+import {
+  dispatchAppointmentConfirmationSms,
+  dispatchAppointmentRescheduleSms,
+  dispatchAppointmentCancellationSms,
+} from "@/lib/notifications/mutations";
 import type {
   CreateAppointmentInput,
   UpdateAppointmentInput,
@@ -49,6 +53,19 @@ async function maybeDispatchConfirmationSms(
 ): Promise<void> {
   if (status === "Confirmed") {
     await dispatchAppointmentConfirmationSms(staff, appointmentId);
+  }
+}
+
+// Same best-effort contract as the confirmation helper: reschedule texts only
+// fire when the appointment is Confirmed (a Pending appointment's final time
+// rides its own confirmation SMS), and never block the reschedule write.
+async function maybeDispatchRescheduleSms(
+  staff: Pick<ClinicStaff, "clinicId">,
+  appointmentId: string,
+  status: Appointment["status"],
+): Promise<void> {
+  if (status === "Confirmed") {
+    await dispatchAppointmentRescheduleSms(staff, appointmentId);
   }
 }
 
@@ -164,13 +181,18 @@ export async function rescheduleAppointment(
     confirmed: confirm ?? false,
   });
 
-  return prisma.appointment.update({
+  const updated = await prisma.appointment.update({
     where: { id: existing.id },
     data: {
       scheduledAt: new Date(data.scheduledAt),
       ...(data.durationMin ? { durationMin: data.durationMin } : {}),
     },
   });
+
+  // Moving a confirmed appointment should tell the patient the new time.
+  await maybeDispatchRescheduleSms(staff, updated.id, updated.status);
+
+  return updated;
 }
 
 async function assertNoPatientTimeConflict(
@@ -219,7 +241,13 @@ export async function cancelAppointment(
     where: { id, ...clinicWhere(staff), status: { not: "Cancelled" } },
     data: { status: "Cancelled" },
   });
-  return result.count > 0;
+  if (result.count === 0) return false;
+  // Best-effort cancellation SMS — never throws, never blocks the cancel. The
+  // dispatch itself decides whether the patient was told about the booking
+  // (requireConfirmedFirst) so we never text about a cancellation they didn't
+  // know existed.
+  await dispatchAppointmentCancellationSms(staff, id);
+  return true;
 }
 
 // Thrown by createAppointment when the patientId/doctorId belong to another
@@ -409,6 +437,8 @@ export async function cancelAppointmentForVoice(
     where: { id: existing.id },
     data: { status: "Cancelled" },
   });
+  // Best-effort cancellation SMS (only if the caller was confirmed earlier).
+  await dispatchAppointmentCancellationSms(staff, existing.id);
   return { cancelled: true, appointment: existing };
 }
 
@@ -452,6 +482,9 @@ export async function rescheduleAppointmentForVoice(
       data: { scheduledAt: input.toScheduledAt, durationMin: input.durationMin },
       include: VOICE_APPT_INCLUDE,
     });
+    // The caller just moved a (confirmed) appointment on the phone — text them
+    // the new time. Best-effort, never throws.
+    await maybeDispatchRescheduleSms(staff, updated.id, updated.status);
     return { rescheduled: true, appointment: updated };
   } catch (e) {
     if (

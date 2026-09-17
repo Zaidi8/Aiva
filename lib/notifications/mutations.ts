@@ -1,23 +1,41 @@
 // Aiva — tenant-scoped notification writes (SMS dispatch).
 //
-// The Notification model is the audit/log of every message we've sent or
-// tried to send (type/channel/status/message/sentAt/errorMsg). This file owns
-// the WRITE side: building a confirmation SMS for a confirmed appointment and
+// The Notification model is the audit/log of every message we've sent or tried
+// to send (type/channel/status/message/sentAt/errorMsg). This file owns the
+// WRITE side: building patient SMSs for appointment lifecycle events and
 // recording the outcome.
 //
-// Non-blocking by contract: `dispatchAppointmentConfirmationSms` NEVER throws.
-// A TextBee outage, a missing env key or a failed DB write must not undo the
-// appointment confirmation that triggered the dispatch — the appointment write
-// is already committed before this is called. Failure is captured on the
-// Notification row (status=Failed, errorMsg) for staff to see in the bell.
+// Three dispatch entry points, one shared pipeline:
+//   • dispatchAppointmentConfirmationSms — status becomes Confirmed
+//   • dispatchAppointmentRescheduleSms   — an appointment's time is moved
+//   • dispatchAppointmentCancellationSms — an appointment is cancelled
+// Everything routes to sendSms() → getSmsProvider() (see lib/sms), so the
+// confirmation/reschedule/cancellation experience is identical whether the
+// change came from the dashboard or the voice agent.
 //
-// Rate/idempotency: re-saving an already-confirmed appointment (edit notes,
-// bump duration) must NOT re-text the patient. We guard on the prior existence
-// of a SENT confirmation SMS for the appointment; a Failed row is retried the
-// next time confirmation logic runs (that's a legit repair path, not a dup).
+// Non-blocking by contract: dispatches NEVER throw. A TextBee outage, a missing
+// env key or a failed DB write must not undo the appointment write that
+// triggered them — the write is already committed before dispatch is called.
+// Failure is captured on the Notification row (status=Failed, errorMsg).
+//
+// Idempotency:
+//   • Confirmation — re-saving a confirmed appointment must NOT re-text. Skip
+//     if a SENT confirmation already exists for the appointment.
+//   • Reschedule   — every NEW move deserves a text, but re-running the SAME
+//     move (idempotent re-ask, double-submit) must not. The message embeds the
+//     new date+time, so we skip when a SENT "Reschedule" with the IDENTICAL
+//     text exists — a genuinely different move always differs.
+//   • Cancellation — only chase cancellations the patient was actually told
+//     about (a SENT Confirmation exists). Skip if a SENT Cancellation exists.
+//   A Failed row is retried on the next dispatch for that event (legit repair).
 
 import "server-only";
-import type { Appointment, ClinicStaff } from "@prisma/client";
+import type {
+  Appointment,
+  AppointmentStatus,
+  ClinicStaff,
+  NotificationStatus,
+} from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { clinicWhere } from "@/lib/clinic-scope";
 import { getAiSettings } from "@/lib/ai-settings/queries";
@@ -28,12 +46,13 @@ import { getSmsProvider } from "@/lib/sms/provider";
 type ScopedStaff = Pick<ClinicStaff, "clinicId">;
 
 // Why we didn't send (sent:false). Only surfaces internally / for debugging;
-// the API layer keeps treating the appointment as confirmed regardless.
+// the API layer keeps treating the appointment event as done regardless.
 export type SmsSkipReason =
-  | "not_found" // appointment isn't Confirmed (or doesn't belong to this clinic)
+  | "not_found" // appointment isn't in the expected state (or belongs to another clinic)
   | "no_phone" // patient has no usable phone number on file
   | "disabled" // AiSettings.sendConfirmations = false
-  | "duplicate"; // a confirmation SMS was already sent for this appointment
+  | "duplicate" // the same SMS was already sent for this event
+  | "not_confirmed"; // cancellation only: the patient was never sent a confirmation
 
 export interface SmsDispatchResult {
   sent: boolean;
@@ -41,35 +60,107 @@ export interface SmsDispatchResult {
   notificationId?: string;
 }
 
-// Appointment shape this dispatch needs, fetched tenant-scoped.
+type SmsEvent = "Confirmation" | "Reschedule" | "Cancellation";
+
+// Appointment shape a dispatch needs, fetched tenant-scoped.
 type AppointmentForSms = Appointment & {
-  patient: {
-    id: string;
-    fullName: string;
-    phoneNumber: string;
-  };
+  patient: { id: string; fullName: string; phoneNumber: string };
   doctor: { id: string; name: string };
   clinic: { id: string; name: string; timezone: string };
 };
 
-export async function dispatchAppointmentConfirmationSms(
+// Duplicate check receives the most recent SMS row for the same (appointment,
+// event) plus the message this dispatch WOULD send; return true when the send
+// should be skipped as a repeat.
+type DuplicateCheck = (
+  prior: { status: NotificationStatus; message: string } | null,
+  message: string,
+) => boolean;
+
+// ────────────────────────────────────────────────────────────────────────────
+// Public entry points
+// ────────────────────────────────────────────────────────────────────────────
+
+export function dispatchAppointmentConfirmationSms(
   staff: ScopedStaff,
   appointmentId: string,
 ): Promise<SmsDispatchResult> {
+  return dispatchEvent(staff, appointmentId, {
+    event: "Confirmation",
+    // A confirmation tells the patient a time they were never told before —
+    // one per appointment, period.
+    requireStatus: "Confirmed",
+    isDuplicate: (prior) => prior?.status === "Sent",
+    buildMessage: confirmationMessage,
+  });
+}
+
+export function dispatchAppointmentRescheduleSms(
+  staff: ScopedStaff,
+  appointmentId: string,
+): Promise<SmsDispatchResult> {
+  return dispatchEvent(staff, appointmentId, {
+    event: "Reschedule",
+    // Only confirmed commitments get a "we moved it" text; a Pending
+    // appointment's final time will ride its own confirmation SMS.
+    requireStatus: "Confirmed",
+    // Same message text = same move already notified. Different move = new text.
+    isDuplicate: (prior, message) =>
+      prior?.status === "Sent" && prior.message === message,
+    buildMessage: rescheduleMessage,
+  });
+}
+
+export function dispatchAppointmentCancellationSms(
+  staff: ScopedStaff,
+  appointmentId: string,
+): Promise<SmsDispatchResult> {
+  return dispatchEvent(staff, appointmentId, {
+    event: "Cancellation",
+    requireStatus: undefined, // the row is already Cancelled when we run
+    // One cancellation per appointment; a cancelled row can't be re-cancelled.
+    isDuplicate: (prior) => prior?.status === "Sent",
+    buildMessage: cancellationMessage,
+    requireConfirmedFirst: true,
+  });
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Shared pipeline
+// ────────────────────────────────────────────────────────────────────────────
+
+async function dispatchEvent(
+  staff: ScopedStaff,
+  appointmentId: string,
+  opts: {
+    event: SmsEvent;
+    requireStatus?: AppointmentStatus;
+    isDuplicate: DuplicateCheck;
+    buildMessage: (a: AppointmentForSms) => string;
+    /** Cancellation only: skip unless a SENT Confirmation SMS exists. */
+    requireConfirmedFirst?: boolean;
+  },
+): Promise<SmsDispatchResult> {
+  let appointment: AppointmentForSms | null = null;
   try {
-    // 0. Respect the clinic's toggle. Default AiSettings.sendConfirmations is
-    //    true (registered at signup), so this is "on" unless an admin switched
-    //    it off in Settings → AI.
+    // 0. Master switch. Default AiSettings.sendConfirmations is true (set at
+    //    signup), so patient SMS is "on" unless an admin turned it off in
+    //    Settings → AI. Gates confirmations AND reschedules AND cancellations —
+    //    one consistent off-switch for automated patient texts.
     const settings = await getAiSettings(staff);
     if (settings && settings.sendConfirmations === false) {
       return { sent: false, reason: "disabled" };
     }
 
-    // 1. Load the confirmed appointment + everything needed to write the text.
-    //    Scoped the same way appointments/queries.ts does. If it's not
-    //    Confirmed (or belongs to another clinic), there's nothing to send.
-    const appointment = await prisma.appointment.findFirst({
-      where: { id: appointmentId, ...clinicWhere(staff), status: "Confirmed" },
+    // 1. Load the appointment + everything needed to write the text. Scoped the
+    //    same way appointments/queries.ts does. Wrong status (or another
+    //    clinic) → nothing to send.
+    appointment = await prisma.appointment.findFirst({
+      where: {
+        id: appointmentId,
+        ...(opts.requireStatus ? { status: opts.requireStatus } : {}),
+        ...clinicWhere(staff),
+      },
       include: {
         patient: { select: { id: true, fullName: true, phoneNumber: true } },
         doctor: { select: { id: true, name: true } },
@@ -81,30 +172,40 @@ export async function dispatchAppointmentConfirmationSms(
     const e164 = smsE164(appointment.patient.phoneNumber);
     if (!e164) return { sent: false, reason: "no_phone" };
 
-    // 2. Duplicate guard. A second SENT confirmation for the same appointment
-    //    means the patient was already texted — editing/re-saving the
-    //    appointment must not send again. (Failed rows are retried.)
+    // 2. Cancellation guard: only chase cancels the patient was told about.
+    if (opts.requireConfirmedFirst) {
+      const wasConfirmed = await prisma.notification.findFirst({
+        where: {
+          appointmentId: appointment.id,
+          type: "Confirmation",
+          channel: "SMS",
+          status: "Sent",
+          patient: { clinicId: staff.clinicId },
+        },
+        select: { id: true },
+      });
+      if (!wasConfirmed) return { sent: false, reason: "not_confirmed" };
+    }
+
+    // 3. Build the text once, then duplicate-guard per event (see header rules).
+    const message = opts.buildMessage(appointment);
     const prior = await prisma.notification.findFirst({
       where: {
         appointmentId: appointment.id,
-        type: "Confirmation",
+        type: opts.event,
         channel: "SMS",
         patient: { clinicId: staff.clinicId },
       },
       orderBy: { createdAt: "desc" },
-      select: { status: true },
+      select: { status: true, message: true },
     });
-    if (prior?.status === "Sent") {
-      return { sent: false, reason: "duplicate" };
-    }
+    if (opts.isDuplicate(prior, message)) return { sent: false, reason: "duplicate" };
 
-    const message = buildConfirmationSms(appointment);
-
-    // 3. Write the intent first (Pending), then send, then mark the outcome.
+    // 4. Write the intent first (Pending), then send, then mark the outcome.
     //    Sequential queries — the Supabase pooler is connection_limit=1.
     const notification = await prisma.notification.create({
       data: {
-        type: "Confirmation",
+        type: opts.event,
         channel: "SMS",
         status: "Pending",
         message,
@@ -134,11 +235,38 @@ export async function dispatchAppointmentConfirmationSms(
     return { sent: true, notificationId: notification.id };
   } catch (e) {
     // Last-resort guard: never let SMS bookkeeping break the appointment flow.
-    // The failure is logged to the server console; staff visibility into the
+    // Failure is logged to the server console; staff visibility into the
     // dropped send is a follow-up job (the row may never have been created).
-    console.error("[sms] confirmation dispatch failed", e);
+    console.error(`[sms] ${opts.event} dispatch failed`, e);
     return { sent: false };
   }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Message builders
+// ────────────────────────────────────────────────────────────────────────────
+
+// Clinic-local date/time, so the patient sees noon/morning in the clinic's own
+// timezone, not the dashboard viewer's.
+function messageDate(a: AppointmentForSms): string {
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: a.clinic.timezone,
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  }).format(a.scheduledAt);
+}
+
+function confirmationMessage(a: AppointmentForSms): string {
+  return `${a.clinic.name}: Your appointment with Dr. ${a.doctor.name} is CONFIRMED for ${messageDate(a)} at ${toLocalTime(a.scheduledAt, a.clinic.timezone)}.`;
+}
+
+function rescheduleMessage(a: AppointmentForSms): string {
+  return `${a.clinic.name}: Your appointment with Dr. ${a.doctor.name} has been RESCHEDULED to ${messageDate(a)} at ${toLocalTime(a.scheduledAt, a.clinic.timezone)}.`;
+}
+
+function cancellationMessage(a: AppointmentForSms): string {
+  return `${a.clinic.name}: Your appointment with Dr. ${a.doctor.name} on ${messageDate(a)} at ${toLocalTime(a.scheduledAt, a.clinic.timezone)} has been CANCELLED.`;
 }
 
 // Convert the stored phone to TextBee's required E.164 form ("+92…"). The
@@ -147,18 +275,4 @@ export async function dispatchAppointmentConfirmationSms(
 function smsE164(raw: string | null): string | null {
   if (!raw || !raw.trim()) return null;
   return toE164(raw, process.env.SMS_DEFAULT_COUNTRY_CODE?.trim() || "92");
-}
-
-// "Delightful Clinic: Your appointment with Dr. Ahmed Khan is CONFIRMED for
-// 16 Sep 2026 at 14:30." — clinic-local date/time, so the patient sees the
-// time in the clinic's own timezone, not the dashboard viewer's.
-function buildConfirmationSms(appointment: AppointmentForSms): string {
-  const date = new Intl.DateTimeFormat("en-GB", {
-    timeZone: appointment.clinic.timezone,
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  }).format(appointment.scheduledAt);
-  const time = toLocalTime(appointment.scheduledAt, appointment.clinic.timezone);
-  return `${appointment.clinic.name}: Your appointment with ${appointment.doctor.name} is CONFIRMED for ${date} at ${time}.`;
 }
