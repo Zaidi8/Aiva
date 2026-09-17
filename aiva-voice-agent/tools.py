@@ -18,8 +18,9 @@ Design notes:
 from __future__ import annotations
 
 import logging
+import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import aiohttp
@@ -76,6 +77,22 @@ class ToolConfig:
     """Whether this clinic lets the agent reschedule/cancel (AiSettings.
     handleRescheduling). When False, `reschedule_appointment` and
     `cancel_appointment` are NOT exposed to the LLM."""
+    conflict_acks: dict[str, list[str]] = field(
+        default_factory=dict, compare=False, hash=False
+    )
+    """Per-call record of conflicts the agent has already been SHOWN, keyed by
+    slot fingerprint -> the conflicting appointment ids. Phase 11b: the backend
+    refuses a cross-doctor double-booking unless the agent echoes those ids, so a
+    write can only happen after the warning was actually disclosed. A fresh
+    ToolConfig is built per call, so this never leaks across callers."""
+
+
+def _conflict_key(doctor_name: str, date: str, time: str, phone: str) -> str:
+    """Fingerprint a requested slot so a conflict warning shown for it can be
+    matched to a later confirmed retry (Phase 11b). Digits-only phone so
+    punctuation/whitespace differences don't break the match."""
+    digits = re.sub(r"\D", "", phone or "")
+    return f"{(doctor_name or '').strip().lower()}|{date}|{time}|{digits}"
 
 
 def _notify_booking(config: ToolConfig, appointment_id: str | None, patient_id: str | None) -> None:
@@ -399,10 +416,10 @@ def build_tools(config: ToolConfig) -> list:
         """Book an appointment. WRITES. Call only after the slot is confirmed open, the
         caller gave their real full name + phone, and they said yes to a read-back.
         `date` YYYY-MM-DD, `time` "HH:mm" matching an open slot, `phone` the
-        caller's number. If the backend reports a conflict (same time already
-        booked under a different doctor), read it back, ask if it's for someone
-        else, and only re-call with `confirm` True after they say yes."""
-        import re
+        caller's number. If there is a conflict (same time already booked under a
+        different doctor) this tool itself announces the warning: do not repeat it,
+        do not re-call, and wait. Only if the caller then clearly says yes, call
+        again with `confirm` True."""
         _say_filler(context, "Okay, booking that now.")
         # Safety net: reject empty / obviously fake phone numbers.
         digits = re.sub(r"\D", "", phone or "")
@@ -411,6 +428,7 @@ def build_tools(config: ToolConfig) -> list:
                 "I need the caller's real phone number before I can book. "
                 "Please ask them for their phone number."
             )
+        key = _conflict_key(doctor_name, date, time, phone)
         body: dict[str, Any] = {
             "doctorName": doctor_name,
             "date": date,
@@ -418,12 +436,18 @@ def build_tools(config: ToolConfig) -> list:
             "phone": phone,
             "confirm": bool(confirm),
         }
+        # Phase 11b: echo the ids from a conflict we were shown earlier this call.
+        # Only sent when the model actually asks to proceed (confirm=True), so a
+        # premature confirm on the first call carries no ids and still gets refused.
+        if confirm and key in config.conflict_acks:
+            body["conflictAckIds"] = config.conflict_acks[key]
         if patient_name.strip():
             body["patientName"] = patient_name.strip()
         data = await _post(config, "book", body)
         if data is None:
             return "I couldn't complete the booking right now. A teammate will follow up."
         if data.get("booked"):
+            config.conflict_acks.pop(key, None)
             appt = data.get("appointment") or {}
             who = appt.get("doctor", doctor_name)
             when_d = appt.get("date", date)
@@ -441,21 +465,34 @@ def build_tools(config: ToolConfig) -> list:
             return f"I couldn't find a doctor named {doctor_name}."
         if reason == "conflict":
             # Same patient already has a same-time appointment with a different
-            # doctor. Read it back so the caller can decide whether to proceed.
-            parts = []
-            for c in data.get("conflicts") or []:
-                parts.append(
-                    f"{c.get('doctor')} on {c.get('date')} at {c.get('time')}"
+            # doctor. Phase 11b: remember the ids we were shown (so a later
+            # confirmed retry can prove the warning was disclosed), and SPEAK the
+            # warning from here so it is heard even if the model stays silent.
+            conflicts = data.get("conflicts") or []
+            ids = [c["appointmentId"] for c in conflicts if c.get("appointmentId")]
+            if ids:
+                config.conflict_acks[key] = ids
+            parts = [
+                f"{c.get('doctor')} on {c.get('date')} at {c.get('time')}"
+                for c in conflicts
+            ]
+            if parts:
+                warning = (
+                    f"Heads up — this name and number already have an appointment "
+                    f"at that same time with {', '.join(parts)}. Are you booking "
+                    "this one for someone else, and do you still want to go ahead?"
                 )
-            if not parts:
-                return (
-                    f"It looks like {patient_name.strip() or 'this patient'} already has "
-                    "an appointment at that time. Do you still want to book this one?"
+            else:
+                warning = (
+                    f"It looks like {patient_name.strip() or 'this patient'} already "
+                    "has an appointment at that time. Do you still want to book this one?"
                 )
+            _say_filler(context, warning)
             return (
-                "I see this name and number already have an appointment at that "
-                f"same time — {', '.join(parts)}. Are you booking this one for "
-                "someone else, and do you still want to go ahead?"
+                "I have just told the caller about the existing appointment and asked "
+                "whether it's for someone else and whether they still want to go ahead. "
+                "Do NOT repeat that warning and do NOT call book_appointment again — "
+                "wait for their next reply."
             )
         if reason == "slot_taken":
             return "Sorry, that time was just taken. Would you like another time?"
@@ -515,25 +552,28 @@ def build_tools(config: ToolConfig) -> list:
         move back, and the caller said yes. `date`/`time` are the CURRENT date
         (YYYY-MM-DD) and time ("HH:mm"); `new_date`/`new_time` the new ones;
         `phone` the number it's under. On a conflict (new time clashes with the
-        caller's booking under a different doctor), read it back and only re-call
-        with `confirm` True after they say they want it anyway."""
+        caller's booking under a different doctor) this tool itself announces the
+        warning: do not repeat it, do not re-call, and wait. Only if the caller then
+        clearly says they want it anyway, call again with `confirm` True."""
         _say_filler(context, "Okay, let me move that for you.")
-        data = await _post(
-            config,
-            "reschedule",
-            {
-                "doctorName": doctor_name,
-                "date": date,
-                "time": time,
-                "newDate": new_date,
-                "newTime": new_time,
-                "phone": phone,
-                "confirm": bool(confirm),
-            },
-        )
+        key = _conflict_key(doctor_name, new_date, new_time, phone)
+        body: dict[str, Any] = {
+            "doctorName": doctor_name,
+            "date": date,
+            "time": time,
+            "newDate": new_date,
+            "newTime": new_time,
+            "phone": phone,
+            "confirm": bool(confirm),
+        }
+        # Phase 11b: echo the ids from a conflict we were shown earlier this call.
+        if confirm and key in config.conflict_acks:
+            body["conflictAckIds"] = config.conflict_acks[key]
+        data = await _post(config, "reschedule", body)
         if data is None:
             return "I couldn't reschedule that right now. A teammate will follow up."
         if data.get("rescheduled"):
+            config.conflict_acks.pop(key, None)
             appt = data.get("appointment") or {}
             who = appt.get("doctor", doctor_name)
             when_d = appt.get("date", new_date)
@@ -549,20 +589,30 @@ def build_tools(config: ToolConfig) -> list:
                 f"under {phone}. Could you double-check those details?"
             )
         if reason == "conflict":
-            parts = []
-            for c in data.get("conflicts") or []:
-                parts.append(
-                    f"{c.get('doctor')} on {c.get('date')} at {c.get('time')}"
+            conflicts = data.get("conflicts") or []
+            ids = [c["appointmentId"] for c in conflicts if c.get("appointmentId")]
+            if ids:
+                config.conflict_acks[key] = ids
+            parts = [
+                f"{c.get('doctor')} on {c.get('date')} at {c.get('time')}"
+                for c in conflicts
+            ]
+            if parts:
+                warning = (
+                    "Heads up — that new time clashes with an appointment this "
+                    f"number already has with {', '.join(parts)}. Do you still want "
+                    "to move it there anyway, or pick a different time?"
                 )
-            if not parts:
-                return (
+            else:
+                warning = (
                     "That new time already overlaps another appointment under this "
                     "number. Do you still want to move it there?"
                 )
+            _say_filler(context, warning)
             return (
-                "That new time clashes with an appointment this number already "
-                f"has — {', '.join(parts)}. Do you still want to move it there "
-                "anyway, or pick a different time?"
+                "I have just told the caller about the clash and asked whether they "
+                "still want to move it. Do NOT repeat that warning and do NOT call "
+                "reschedule_appointment again — wait for their next reply."
             )
         if reason == "slot_taken":
             return f"Sorry, {new_time} on {new_date} was just taken. Want to pick another time?"

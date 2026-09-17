@@ -15,6 +15,7 @@ import { listActiveDoctors } from "@/lib/doctors/queries";
 import { matchDoctor } from "@/lib/voice/doctor-match";
 import {
   computeAvailability,
+  conflictsAcknowledged,
   findPatientTimeConflicts,
 } from "@/lib/appointments/queries";
 import {
@@ -40,8 +41,16 @@ export const POST = withWebhookSecret(async (req) => {
   }
   const parsed = voiceBookBodySchema.safeParse(body);
   if (!parsed.success) return failValidation(parsed.error);
-  const { clinicId, doctorName, date, time, phone, patientName, confirm } =
-    parsed.data;
+  const {
+    clinicId,
+    doctorName,
+    date,
+    time,
+    phone,
+    patientName,
+    confirm,
+    conflictAckIds,
+  } = parsed.data;
   const staff = { clinicId };
 
   try {
@@ -102,22 +111,27 @@ export const POST = withWebhookSecret(async (req) => {
 
     // Phase 11 — patient-level conflict guard. The DB unique constraint is per
     // doctor, so the SAME patient could otherwise hold two appointments at the
-    // same clock time with different doctors. Unless the caller has explicitly
-    // confirmed (confirm=true, spoken after hearing the warning), refuse and
-    // return the conflicting appointment(s) for the agent to read back. A
-    // same-doctor overlap here is either the caller's own idempotent re-book or
-    // someone else's slot-taken — both handled downstream, NOT a conflict.
+    // same clock time with different doctors. We refuse and return the
+    // conflicting appointment(s) for the agent to read back UNLESS the override is
+    // proven: `confirm` alone is not enough (a model can set it before the warning
+    // was ever spoken), so the agent must also echo the `conflictAckIds` it was
+    // shown — see `conflictsAcknowledged`. A same-doctor overlap here is either
+    // the caller's own idempotent re-book or someone else's slot-taken — both
+    // handled downstream, NOT a conflict.
     const conflicts = await findPatientTimeConflicts(staff, {
       phone,
       from: scheduledAt,
       to: new Date(scheduledAt.getTime() + durationMin * 60_000),
     });
-    if (conflicts.some((c) => c.doctorId !== doctor.id) && !confirm) {
-      const cross = conflicts.filter((c) => c.doctorId !== doctor.id);
+    const cross = conflicts.filter((c) => c.doctorId !== doctor.id);
+    const overrideProven =
+      confirm === true && conflictsAcknowledged(cross, conflictAckIds);
+    if (cross.length > 0 && !overrideProven) {
       return ok({
         booked: false,
         reason: "conflict",
         conflicts: cross.map((c) => ({
+          appointmentId: c.appointmentId,
           doctor: c.doctorName,
           date: toLocalDate(c.scheduledAt, clinic.timezone),
           time: toLocalTime(c.scheduledAt, clinic.timezone),

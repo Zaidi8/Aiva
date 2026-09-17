@@ -233,6 +233,24 @@ export async function findPatientTimeConflictsByIds(
   return conflicts.filter((c) => c.doctorId !== args.doctorId);
 }
 
+// Phase 11b — override guard. A caller may only book/reschedule onto a slot that
+// overlaps another of their appointments under a DIFFERENT doctor if they were
+// first WARNED and then said yes. A bare `confirm: true` from the LLM is NOT
+// enough: a model can set it before the warning was ever spoken, which produced a
+// real silent double-booking. So the agent must ALSO echo back the
+// `appointmentId`s it was shown. Those ids only exist in a conflict response —
+// echoing the CURRENT ones proves the warning was actually disclosed — and
+// requiring all of them to match rejects a stale or invented ack.
+export function conflictsAcknowledged(
+  conflicts: PatientConflict[],
+  ackIds: readonly string[] | undefined,
+): boolean {
+  if (conflicts.length === 0) return true;
+  if (!ackIds || ackIds.length === 0) return false;
+  const acked = new Set(ackIds);
+  return conflicts.every((c) => acked.has(c.appointmentId));
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // Slot availability
 //

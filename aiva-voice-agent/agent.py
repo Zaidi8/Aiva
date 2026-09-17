@@ -582,7 +582,11 @@ async def entrypoint(ctx: JobContext) -> None:
     # FallbackAdapter does NOT catch (it only retries on 429).
     # max_completion_tokens caps reasoning + reply tokens so each request's
     # "Requested" (and therefore the 8k/min cap hit) stays small and bounded
-    # instead of consuming the Groq model default.
+    # instead of consuming the Groq model default. It MUST stay <= 1000: Groq
+    # rejects the whole request outright (HTTP 429, BEFORE any generation) when
+    # max_completion_tokens exceeds the model's output-tokens-per-minute cap, and
+    # qwen/qwen3.8-27b's OTPM is exactly 1000. 512 leaves headroom while still
+    # covering a spoken sentence plus a tool call.
     # temperature kept low for instruction-following on a phone call.
     #
     # Phase 8: wrap the primary in a FallbackAdapter with a SECOND model. Groq's
@@ -598,12 +602,12 @@ async def entrypoint(ctx: JobContext) -> None:
             groq.LLM(
                 model=primary_model,
                 temperature=0.3,
-                max_completion_tokens=1024,
+                max_completion_tokens=512,
             ),
             groq.LLM(
                 model=fallback_model,
                 temperature=0.3,
-                max_completion_tokens=1024,
+                max_completion_tokens=512,
             ),
         ]
     )

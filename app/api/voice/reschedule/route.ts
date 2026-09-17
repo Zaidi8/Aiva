@@ -14,6 +14,7 @@ import { listActiveDoctors } from "@/lib/doctors/queries";
 import { matchDoctor } from "@/lib/voice/doctor-match";
 import {
   computeAvailability,
+  conflictsAcknowledged,
   findPatientTimeConflicts,
 } from "@/lib/appointments/queries";
 import { rescheduleAppointmentForVoice } from "@/lib/appointments/mutations";
@@ -36,8 +37,17 @@ export const POST = withWebhookSecret(async (req) => {
   }
   const parsed = voiceRescheduleBodySchema.safeParse(body);
   if (!parsed.success) return failValidation(parsed.error);
-  const { clinicId, doctorName, date, time, newDate, newTime, phone, confirm } =
-    parsed.data;
+  const {
+    clinicId,
+    doctorName,
+    date,
+    time,
+    newDate,
+    newTime,
+    phone,
+    confirm,
+    conflictAckIds,
+  } = parsed.data;
   const staff = { clinicId };
 
   try {
@@ -100,9 +110,11 @@ export const POST = withWebhookSecret(async (req) => {
 
     // Phase 11 — patient-level conflict guard for moves. Moving onto a time that
     // overlaps ANOTHER of this patient's appointments (different doctor) is the
-    // same double-booking hazard as a fresh cross-doctor booking. Refuse until
-    // the caller has heard the warning and confirmed. Same-doctor overlaps are
-    // the appointment being moved / a slot-taken guard downstream — not conflicts.
+    // same double-booking hazard as a fresh cross-doctor booking. Refuse unless the
+    // override is proven — `confirm` AND the `conflictAckIds` from the warning the
+    // agent was shown (Phase 11b); a bare confirm cannot bypass it. Same-doctor
+    // overlaps are the appointment being moved / a slot-taken guard downstream —
+    // not conflicts.
     const conflicts = (
       await findPatientTimeConflicts(staff, {
         phone,
@@ -110,11 +122,14 @@ export const POST = withWebhookSecret(async (req) => {
         to: new Date(toScheduledAt.getTime() + durationMin * 60_000),
       })
     ).filter((c) => c.doctorId !== doctor.id);
-    if (conflicts.length > 0 && !confirm) {
+    const overrideProven =
+      confirm === true && conflictsAcknowledged(conflicts, conflictAckIds);
+    if (conflicts.length > 0 && !overrideProven) {
       return ok({
         rescheduled: false,
         reason: "conflict",
         conflicts: conflicts.map((c) => ({
+          appointmentId: c.appointmentId,
           doctor: c.doctorName,
           date: toLocalDate(c.scheduledAt, clinic.timezone),
           time: toLocalTime(c.scheduledAt, clinic.timezone),

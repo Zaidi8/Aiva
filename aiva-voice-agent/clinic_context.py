@@ -357,12 +357,12 @@ def render_system_prompt(context: dict[str, Any], today: str | None = None) -> s
             "ask again."
         )
         lines.append(
-            "- CONFLICT: if book_appointment says that name and phone already "
-            "have a same-time appointment with a DIFFERENT doctor (conflict "
-            "details are in its reply), read them back exactly and ask whether "
-            "they are booking this one for someone else and still want to go "
-            "ahead. Never book silently. Only on a clear yes, call "
-            "book_appointment again with the same details and confirm=True."
+            "- CONFLICT: if a same-time appointment already exists under a "
+            "DIFFERENT doctor, book_appointment has ALREADY warned the caller out "
+            "loud — do not repeat the warning. Say nothing more about it and wait. "
+            "Never book silently. Only if the caller's next turn clearly says yes, "
+            "call book_appointment again with the same details and confirm=True; "
+            "otherwise help them pick another time."
         )
         lines.append(
             "- Never call book_appointment without the caller's real phone number, "
@@ -400,11 +400,12 @@ def render_system_prompt(context: dict[str, Any], today: str | None = None) -> s
             "Never do either without spoken confirmation."
         )
         lines.append(
-            "- CONFLICT: if a reschedule says the new time already overlaps "
-            "another appointment under that number (a different doctor), read it "
-            "back and ask if they still want to move there anyway or pick a "
-            "different time. Only on a clear yes, re-call reschedule_appointment "
-            "with the same details and confirm=True."
+            "- CONFLICT: if the new time already overlaps another appointment "
+            "under that number (a different doctor), reschedule_appointment has "
+            "ALREADY warned the caller out loud — do not repeat it. Say nothing "
+            "more and wait. Only if the caller's next turn clearly says yes, "
+            "re-call reschedule_appointment with the same details and "
+            "confirm=True; otherwise help them pick a different time."
         )
         lines.append(
             "- You can't transfer to a human; for anything you can't do, say a "
