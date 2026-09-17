@@ -4,7 +4,7 @@ A LiveKit Agents worker that wires:
   - Silero VAD
   - LiveKit turn-detector (English)
   - Groq Whisper Large v3 Turbo (STT)
-  - Groq openai/gpt-oss-120b (LLM)
+  - Groq qwen/qwen3.8-27b (LLM) with openai/gpt-oss-120b mid-turn 429 fallback
   - ElevenLabs TTS (Sarah)
 
 Phase 2 adds: per-call clinic-context fetch from the Next.js app, rendered
@@ -565,13 +565,18 @@ async def entrypoint(ctx: JobContext) -> None:
         greeting = FALLBACK_GREETING
 
     stt = groq.STT(model="whisper-large-v3-turbo", language="en")
-    # Prime the budget on openai/gpt-oss-20b instead of 120b: Groq free-tier
-    # limits are PER MODEL, and 20b has its own fresh token bucket, produces far
-    # less reasoning/completion (smaller "Requested" per call), and is lower
-    # latency — the right default for the 8k TPM voice workload. 120b stays as
-    # the fallback so a drained 20b bucket fails over to a SECOND distinct bucket.
-    # Both models are env-overridable (AIVA_PRIMARY_MODEL / AIVA_FALLBACK_MODEL)
-    # for testing without a code change.
+    # Primary is qwen/qwen3.8-27b: the most capable current Groq model that still
+    # supports tool calling (groq/compound has a higher token budget but rejects
+    # tools outright). It is a stronger instruction-follower than gpt-oss-20b and
+    # is far less prone to the "rushed booking" failure seen on 2026-09-17, where
+    # the caller never named a time yet the agent read back a slot as if chosen.
+    # NOTE: every usable Groq chat model is capped at 8,000 TPM free, so the
+    # model swap buys reliability, NOT extra budget — the prompt diet, output cap
+    # and FallbackAdapter are what protect the token budget.
+    # The fallback stays openai/gpt-oss-120b deliberately: if the primary drains
+    # mid-turn, the adapter must fail over to another HIGH-capability model, not a
+    # weak one — a 429 switch to a small model mid-conversation is what produced
+    # the hallucinated read-back on that call.
     # Earlier models (llama-3.3-70b-versatile, meta-llama/llama-4-scout) were
     # decommissioned by Groq and now return HTTP 400 (model_not_found), which the
     # FallbackAdapter does NOT catch (it only retries on 429).
@@ -586,7 +591,7 @@ async def entrypoint(ctx: JobContext) -> None:
     # caller still gets an answer. If BOTH are exhausted, the APIError reaches
     # AivaAgent.llm_node, which speaks the graceful fallback line instead of
     # going silent (Phase 7).
-    primary_model = os.environ.get("AIVA_PRIMARY_MODEL", "openai/gpt-oss-20b")
+    primary_model = os.environ.get("AIVA_PRIMARY_MODEL", "qwen/qwen3.8-27b")
     fallback_model = os.environ.get("AIVA_FALLBACK_MODEL", "openai/gpt-oss-120b")
     llm = FallbackAdapter(
         [

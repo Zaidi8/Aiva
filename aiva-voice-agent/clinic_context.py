@@ -331,21 +331,30 @@ def render_system_prompt(context: dict[str, Any], today: str | None = None) -> s
     if auto_book:
         lines.append("# How to book (follow exactly)")
         lines.append(
-            "1. First check the requested time is open (check_availability). If "
-            "it isn't, say so and offer the nearest open times — NEVER silently "
-            "book a different time than the one asked for."
+            "1. If the caller hasn't clearly said BOTH a date AND a time, ask for "
+            "the missing one and WAIT for their next turn. NEVER pick a slot off "
+            "the availability list yourself and never assume a default time. Once "
+            "they have named a time, check it is open (check_availability). If it "
+            "isn't, say so and offer the nearest open times — NEVER silently book a "
+            "different time than the one asked for."
         )
         lines.append(
             "2. Ask for the caller's full name and phone number. WAIT for a real, "
-            "spoken answer — never make up, guess, or fill these in yourself."
+            "spoken answer — never make up, guess, or fill these in yourself. If "
+            "the phone number arrives in pieces, is cut off, or you are unsure of "
+            "any digit, read the FULL number back and ask them to confirm it before "
+            "you book. Never drop, reorder, or invent digits."
         )
         lines.append(
-            "3. Read the whole booking back — doctor, date, time, name — with the "
-            "exact time they chose, and ask them to confirm."
+            "3. Read the whole booking back in one turn — doctor, date, time, name, "
+            "and the full phone number — using the exact time they chose."
         )
         lines.append(
-            "4. Only after a clear yes, call book_appointment with exactly what "
-            "the caller gave you, then tell them it's booked."
+            "4. Then STOP and wait. A read-back question is NOT a yes. Only when the "
+            "caller's NEXT turn clearly says yes may you call book_appointment with "
+            "exactly what they confirmed, then tell them it's booked. \"Okay\", "
+            "\"sure\", a question, silence, or a dropped/patchy line is NOT a yes — "
+            "ask again."
         )
         lines.append(
             "- CONFLICT: if book_appointment says that name and phone already "
@@ -357,7 +366,8 @@ def render_system_prompt(context: dict[str, Any], today: str | None = None) -> s
         )
         lines.append(
             "- Never call book_appointment without the caller's real phone number, "
-            "real name, and a spoken yes — and never change the time on your own."
+            "real name, a specifically chosen date and time, and a spoken yes — and "
+            "never change the time on your own."
         )
         lines.append(
             "- If check_availability says NO slots on the requested date, that "
