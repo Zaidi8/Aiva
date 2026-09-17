@@ -332,6 +332,9 @@ model Notification {
   message   String
   sentAt    DateTime?           @map("sent_at")
   errorMsg  String?             @map("error_msg")
+  // Provider-side reference for a successful send (e.g. TextBee smsBatchId).
+  // Lets staff trace the message in the gateway's history.
+  providerRef String?           @map("provider_ref")
   createdAt DateTime            @default(now()) @map("created_at")
 
   patientId String  @map("patient_id")

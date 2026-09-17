@@ -12,6 +12,7 @@ import { clinicWhere } from "@/lib/clinic-scope";
 import { normalizePhone } from "@/lib/voice/phone";
 import { toLocalDate, toLocalTime } from "@/lib/voice/tz";
 import { findPatientTimeConflictsByIds } from "@/lib/appointments/queries";
+import { dispatchAppointmentConfirmationSms } from "@/lib/notifications/mutations";
 import type {
   CreateAppointmentInput,
   UpdateAppointmentInput,
@@ -36,6 +37,18 @@ export class PatientConflictError extends Error {
       "This patient already has an appointment at the same time with another doctor.",
     );
     this.name = "PatientConflictError";
+  }
+}
+
+// Confirmations are best-effort and must never block the write that triggered
+// them — dispatchAppointmentConfirmationSms is contract-guaranteed not to throw.
+async function maybeDispatchConfirmationSms(
+  staff: Pick<ClinicStaff, "clinicId">,
+  appointmentId: string,
+  status: Appointment["status"],
+): Promise<void> {
+  if (status === "Confirmed") {
+    await dispatchAppointmentConfirmationSms(staff, appointmentId);
   }
 }
 
@@ -74,7 +87,7 @@ export async function createAppointment(
     confirmed: confirm ?? false,
   });
 
-  return prisma.appointment.create({
+  const created = await prisma.appointment.create({
     data: {
       ...data,
       scheduledAt: new Date(data.scheduledAt),
@@ -82,6 +95,12 @@ export async function createAppointment(
       clinicId: staff.clinicId,
     },
   });
+
+  // A receptionist creating the appointment already-Confirmed means the patient
+  // should get the confirmation text like any other confirmation.
+  await maybeDispatchConfirmationSms(staff, created.id, created.status);
+
+  return created;
 }
 
 export async function updateAppointment(
@@ -89,12 +108,34 @@ export async function updateAppointment(
   id: string,
   input: UpdateAppointmentInput,
 ): Promise<Appointment | null> {
+  // Read the row FIRST (scoped) so we can detect a transition into Confirmed —
+  // the trigger for the confirmation SMS — and so updateMany never silently
+  // no-ops cross-tenant while we then dispatch on a row we shouldn't have.
+  const current = await prisma.appointment.findFirst({
+    where: { id, ...clinicWhere(staff) },
+    select: { status: true },
+  });
+  if (!current) return null;
+
   const result = await prisma.appointment.updateMany({
     where: { id, ...clinicWhere(staff) },
     data: input,
   });
   if (result.count === 0) return null;
-  return prisma.appointment.findUniqueOrThrow({ where: { id } });
+
+  const updated = await prisma.appointment.findUniqueOrThrow({ where: { id } });
+
+  // Pending/… → Confirmed is the single moment we text. Re-saving a confirmed
+  // appointment (notes/duration edits) stays Confirmed → no second SMS; the
+  // notification side repeats the guard anyway.
+  const becameConfirmed =
+    (input.status ?? current.status) === "Confirmed" &&
+    current.status !== "Confirmed";
+  if (becameConfirmed) {
+    await maybeDispatchConfirmationSms(staff, updated.id, updated.status);
+  }
+
+  return updated;
 }
 
 export async function rescheduleAppointment(
@@ -279,6 +320,10 @@ export async function bookAppointmentForVoice(
         doctor: { select: { id: true, name: true } },
       },
     });
+    // Fresh booking → the patient is confirmed as of right now; send the
+    // confirmation text. best-effort, never throws. (The idempotent re-book
+    // branch below skips this — that caller already got the SMS once.)
+    await maybeDispatchConfirmationSms(staff, appointment.id, appointment.status);
     return { appointment, idempotent: false };
   } catch (e) {
     if (
