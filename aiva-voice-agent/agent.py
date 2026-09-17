@@ -565,11 +565,19 @@ async def entrypoint(ctx: JobContext) -> None:
         greeting = FALLBACK_GREETING
 
     stt = groq.STT(model="whisper-large-v3-turbo", language="en")
-    # openai/gpt-oss-120b is Groq's strongest tool-caller as of Aug 2026.
+    # Prime the budget on openai/gpt-oss-20b instead of 120b: Groq free-tier
+    # limits are PER MODEL, and 20b has its own fresh token bucket, produces far
+    # less reasoning/completion (smaller "Requested" per call), and is lower
+    # latency — the right default for the 8k TPM voice workload. 120b stays as
+    # the fallback so a drained 20b bucket fails over to a SECOND distinct bucket.
+    # Both models are env-overridable (AIVA_PRIMARY_MODEL / AIVA_FALLBACK_MODEL)
+    # for testing without a code change.
     # Earlier models (llama-3.3-70b-versatile, meta-llama/llama-4-scout) were
-    # decommissioned by Groq and now return HTTP 400 (model_not_found), which
-    # the FallbackAdapter does NOT catch (it only retries on 429). The fallback
-    # defaults to openai/gpt-oss-20b (low latency, own token bucket).
+    # decommissioned by Groq and now return HTTP 400 (model_not_found), which the
+    # FallbackAdapter does NOT catch (it only retries on 429).
+    # max_completion_tokens caps reasoning + reply tokens so each request's
+    # "Requested" (and therefore the 8k/min cap hit) stays small and bounded
+    # instead of consuming the Groq model default.
     # temperature kept low for instruction-following on a phone call.
     #
     # Phase 8: wrap the primary in a FallbackAdapter with a SECOND model. Groq's
@@ -578,16 +586,20 @@ async def entrypoint(ctx: JobContext) -> None:
     # caller still gets an answer. If BOTH are exhausted, the APIError reaches
     # AivaAgent.llm_node, which speaks the graceful fallback line instead of
     # going silent (Phase 7).
-    # Both models are env-overridable so a drained per-model Groq budget can be
-    # sidestepped for testing WITHOUT a code change — e.g. set
-    # AIVA_PRIMARY_MODEL=openai/gpt-oss-20b (its own fresh token bucket) and
-    # restart the worker. Defaults are the tuned production pair.
-    primary_model = os.environ.get("AIVA_PRIMARY_MODEL", "openai/gpt-oss-120b")
-    fallback_model = os.environ.get("AIVA_FALLBACK_MODEL", "openai/gpt-oss-20b")
+    primary_model = os.environ.get("AIVA_PRIMARY_MODEL", "openai/gpt-oss-20b")
+    fallback_model = os.environ.get("AIVA_FALLBACK_MODEL", "openai/gpt-oss-120b")
     llm = FallbackAdapter(
         [
-            groq.LLM(model=primary_model, temperature=0.3),
-            groq.LLM(model=fallback_model, temperature=0.3),
+            groq.LLM(
+                model=primary_model,
+                temperature=0.3,
+                max_completion_tokens=1024,
+            ),
+            groq.LLM(
+                model=fallback_model,
+                temperature=0.3,
+                max_completion_tokens=1024,
+            ),
         ]
     )
     tts = elevenlabs.TTS(

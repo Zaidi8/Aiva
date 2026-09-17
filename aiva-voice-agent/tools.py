@@ -248,8 +248,8 @@ def build_tools(config: ToolConfig) -> list:
 
     @function_tool
     async def list_doctors(query: str = "") -> str:
-        """List the clinic's doctors. Pass the caller's search term as `query`
-        (a name or kind, e.g. "cardiologist"), or leave empty to list everyone."""
+        """List the clinic's doctors. `query` is the caller's search term (name or
+        kind, e.g. "cardiologist"), or empty to list everyone."""
         params = {"q": query} if query.strip() else {}
         data = await _get(config, "doctors", params)
         if data is None:
@@ -275,15 +275,13 @@ def build_tools(config: ToolConfig) -> list:
         from_time: str = "",
         to_time: str = "",
     ) -> str:
-        """Check a doctor's open slots. `date` is YYYY-MM-DD (clinic-local). If
-        the caller named ONE specific time, pass it as `time` ("HH:mm", 24h, e.g.
-        "16:30") to get whether that exact time is open plus the nearest
-        alternatives. If they named a clinic-local time WINDOW instead ("between
-        4 and 5", "morning", "after 2", "before noon"), pass the edges as
-        `from_time`/`to_time` ("HH:mm", 24h; either may be empty for a half-open
-        bound) to get which slots INSIDE the window are open plus the nearest
-        open slot just outside each edge. Use at most ONE of `time` and the
-        from/to pair. Read-only."""
+        """Check a doctor's open slots on `date` (YYYY-MM-DD, clinic-local). If the
+        caller named ONE time, pass it as `time` ("HH:mm", 24h, e.g. "16:30") to
+        get whether it's open plus nearest alternatives. If they named a WINDOW
+        ("between 4 and 5", "morning", "after 2"), pass its edges as
+        `from_time`/`to_time` ("HH:mm", 24h; either may be empty for half-open) to
+        get which slots inside are open plus the nearest outside each edge. Use at
+        most ONE of `time` and the from/to pair. Read-only."""
         _say_filler(context, "Let me check that for you.")
         params = {"doctorName": doctor_name, "date": date}
         if time.strip():
@@ -369,9 +367,9 @@ def build_tools(config: ToolConfig) -> list:
 
     @function_tool
     async def lookup_appointments(context: RunContext, phone: str) -> str:
-        """Find the caller's upcoming appointments by their `phone`. Use this FIRST
-        when they want to cancel or move one, so you have the exact doctor, date,
-        and time to pass on. Read-only."""
+        """Find the caller's upcoming appointments by `phone`. Use FIRST when they want
+        to cancel or move one, so you have the exact doctor, date, and time.
+        Read-only."""
         _say_filler(context, "Let me pull that up.")
         data = await _get(config, "appointments", {"phone": phone})
         if data is None:
@@ -398,13 +396,12 @@ def build_tools(config: ToolConfig) -> list:
         patient_name: str = "",
         confirm: bool = False,
     ) -> str:
-        """Book an appointment. WRITES. Call only after the slot is confirmed open
-        and the caller said yes to a read-back. `date` YYYY-MM-DD, `time` "HH:mm"
-        matching an open slot, `phone` the caller's number, `patient_name` their
-        full name (needed for a first-time caller). If the backend answers with a
-        `conflict`, the caller already has a same-time appointment with a different
-        doctor — read it back, ask if this is for someone else, and only re-call
-        with `confirm` set to True after they say yes."""
+        """Book an appointment. WRITES. Call only after the slot is confirmed open, the
+        caller gave their real full name + phone, and they said yes to a read-back.
+        `date` YYYY-MM-DD, `time` "HH:mm" matching an open slot, `phone` the
+        caller's number. If the backend reports a conflict (same time already
+        booked under a different doctor), read it back, ask if it's for someone
+        else, and only re-call with `confirm` True after they say yes."""
         import re
         _say_filler(context, "Okay, booking that now.")
         # Safety net: reject empty / obviously fake phone numbers.
@@ -473,10 +470,10 @@ def build_tools(config: ToolConfig) -> list:
         time: str,
         phone: str,
     ) -> str:
-        """Cancel one of the caller's appointments. WRITES. Call only after you
-        looked it up, read it back, and the caller said yes. `date`/`time` are that
-        appointment's date (YYYY-MM-DD) and time ("HH:mm"); `phone` the number it's
-        under."""
+        """Cancel one of the caller's appointments. WRITES. Call only after you looked
+        it up, read it back, and the caller said yes. `date`/`time` are that
+        appointment's date (YYYY-MM-DD) and time ("HH:mm"); `phone` the number
+        it's under."""
         _say_filler(context, "Okay, let me cancel that.")
         data = await _post(
             config,
@@ -513,14 +510,13 @@ def build_tools(config: ToolConfig) -> list:
         phone: str,
         confirm: bool = False,
     ) -> str:
-        """Move one of the caller's appointments to a new time (same doctor).
-        WRITES. Call only after you looked it up, confirmed the NEW time is open,
-        read the move back, and the caller said yes. `date`/`time` are the CURRENT
-        date (YYYY-MM-DD) and time ("HH:mm"); `new_date`/`new_time` the new ones;
-        `phone` the number it's under. If the backend answers with a `conflict`,
-        the new time clashes with the caller's existing appointment under a
-        different doctor — read it back and only re-call with `confirm` set to
-        True after they say they want it anyway."""
+        """Move one of the caller's appointments to a new time (same doctor). WRITES.
+        Call only after you looked it up, confirmed the NEW time is open, read the
+        move back, and the caller said yes. `date`/`time` are the CURRENT date
+        (YYYY-MM-DD) and time ("HH:mm"); `new_date`/`new_time` the new ones;
+        `phone` the number it's under. On a conflict (new time clashes with the
+        caller's booking under a different doctor), read it back and only re-call
+        with `confirm` True after they say they want it anyway."""
         _say_filler(context, "Okay, let me move that for you.")
         data = await _post(
             config,
