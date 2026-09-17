@@ -58,6 +58,45 @@ def _weekday_table(today: str, timezone: str = "Asia/Karachi") -> str:
         )
     return "\n".join(days)
 
+# dayOfWeek 0=Sunday .. 6=Saturday — same convention as the Next.js DTO.
+_DAY_NAMES = [
+    "Sunday",
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+]
+
+
+def _render_opening_hours(opening_hours: Any) -> str:
+    """Render the clinic's openingHours DTO to a compact, readable string like
+    "Monday 9:00 AM–5:00 PM, Tuesday 9:00 AM–5:00 PM".
+
+    `opening_hours` is the backend's normalized list of
+    { dayOfWeek: 0-6, startTime: "HH:mm", endTime: "HH:mm" } (day-sorted and
+    already validated). Returns "" when nothing usable so the caller falls back
+    to "not on file".
+    """
+    if not isinstance(opening_hours, list):
+        return ""
+    parts: list[str] = []
+    for entry in opening_hours:
+        if not isinstance(entry, dict):
+            continue
+        day = entry.get("dayOfWeek")
+        start = entry.get("startTime")
+        end = entry.get("endTime")
+        if not isinstance(day, int) or not (0 <= day <= 6):
+            continue
+        if not start or not end:
+            continue
+        parts.append(
+            f"{_DAY_NAMES[day]} {_fmt_time_12h(str(start))}–{_fmt_time_12h(str(end))}"
+        )
+    return ", ".join(parts)
+
 # The context endpoint does several DB round-trips; from a backend that sits far
 # from the DB region this can take a few seconds. 2.5s was too tight and caused
 # intermittent timeouts → the fallback "technical issue" greeting even when the
