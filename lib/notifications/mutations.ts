@@ -258,15 +258,15 @@ function messageDate(a: AppointmentForSms): string {
 }
 
 function confirmationMessage(a: AppointmentForSms): string {
-  return `${a.clinic.name}: Your appointment with Dr. ${a.doctor.name} is CONFIRMED for ${messageDate(a)} at ${toLocalTime(a.scheduledAt, a.clinic.timezone)}.`;
+  return `${a.clinic.name}: Your appointment with ${a.doctor.name} is CONFIRMED for ${messageDate(a)} at ${toLocalTime(a.scheduledAt, a.clinic.timezone)}.`;
 }
 
 function rescheduleMessage(a: AppointmentForSms): string {
-  return `${a.clinic.name}: Your appointment with Dr. ${a.doctor.name} has been RESCHEDULED to ${messageDate(a)} at ${toLocalTime(a.scheduledAt, a.clinic.timezone)}.`;
+  return `${a.clinic.name}: Your appointment with ${a.doctor.name} has been RESCHEDULED to ${messageDate(a)} at ${toLocalTime(a.scheduledAt, a.clinic.timezone)}.`;
 }
 
 function cancellationMessage(a: AppointmentForSms): string {
-  return `${a.clinic.name}: Your appointment with Dr. ${a.doctor.name} on ${messageDate(a)} at ${toLocalTime(a.scheduledAt, a.clinic.timezone)} has been CANCELLED.`;
+  return `${a.clinic.name}: Your appointment with ${a.doctor.name} on ${messageDate(a)} at ${toLocalTime(a.scheduledAt, a.clinic.timezone)} has been CANCELLED.`;
 }
 
 // Convert the stored phone to TextBee's required E.164 form ("+92…"). The

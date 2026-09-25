@@ -324,10 +324,14 @@ class CallLogger:
 #   stage 2: silence → graceful goodbye, then hang up.
 # Any VAD-detected caller speech resets the escalation to stage 0 so a live
 # conversation proceeds untouched. Tunings are env-overridable:
-#   AIVA_SILENCE_TIMEOUT_S  (default 7.0)  — seconds of silence before each step
+#   AIVA_SILENCE_TIMEOUT_S  (default 17.0) — seconds of silence before each step
 #   AIVA_SILENCE_MAX_PROMPTS(default 2)    — prompts before we hang up
-# ────────────────────────────────────────────────────────────────────────────
-_SILENCE_TIMEOUT_S = float(os.environ.get("AIVA_SILENCE_TIMEOUT_S", "7.0"))
+#
+# The timeout is a normal conversational phone pause, NOT "agent finished, bark":
+# 7s was shorter than both the caller's natural reply time on a phone and our own
+# ~4-8s DB round-trips, so the agent sounded like it cut in right after speaking.
+# 17s lets the caller actually answer (or a tool finish) before the first prompt.
+_SILENCE_TIMEOUT_S = float(os.environ.get("AIVA_SILENCE_TIMEOUT_S", "17.0"))
 _SILENCE_MAX_PROMPTS = int(os.environ.get("AIVA_SILENCE_MAX_PROMPTS", "2"))
 _PROMPT_STILL_THERE = "Are you still there?"
 _PROMPT_TROUBLE = (

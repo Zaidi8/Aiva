@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import aiohttp
-from livekit.agents import RunContext, function_tool
+from livekit.agents import RunContext, StopResponse, function_tool
 
 logger = logging.getLogger("aiva.tools")
 
@@ -40,17 +40,22 @@ def _fmt_time_12h(hhmm: str) -> str:
         return hhmm
 
 
-def _say_filler(context: RunContext, text: str) -> None:
+def _say_filler(context: RunContext, text: str, *, add_to_chat_ctx: bool = False) -> None:
     """Speak a brief acknowledgement before a slow backend round-trip.
 
     Phase 5 bug #5: the availability/booking calls hit a geographically-distant
     DB (~4-5s warm), and without feedback the caller hears dead air and assumes
     the line dropped. We speak a short filler immediately so the wait is filled.
-    Fire-and-forget (not awaited) and `add_to_chat_ctx=False` so it doesn't enter
-    the LLM context or block the tool. Fail-soft: never let a filler break a call.
+    Fire-and-forget (not awaited) so it doesn't block the tool. Fail-soft: never
+    let a filler break a call.
+
+    `add_to_chat_ctx=True` (used for conflict warnings) ALSO inserts the line as
+    an assistant message in the LLM context + persisted transcript, so the exact
+    warning the caller heard is shown on the AI Receptionist page and the model
+    (including a mid-turn fallback model) sees precisely what was said.
     """
     try:
-        context.session.say(text, add_to_chat_ctx=False)
+        context.session.say(text, add_to_chat_ctx=add_to_chat_ctx)
     except Exception as exc:  # noqa: BLE001 — a filler must never drop the call
         logger.debug("filler say failed (non-fatal): %s", exc)
 
@@ -77,19 +82,33 @@ class ToolConfig:
     """Whether this clinic lets the agent reschedule/cancel (AiSettings.
     handleRescheduling). When False, `reschedule_appointment` and
     `cancel_appointment` are NOT exposed to the LLM."""
-    conflict_acks: dict[str, list[str]] = field(
-        default_factory=dict, compare=False, hash=False
+    conflict_refused: set[str] = field(
+        default_factory=set, compare=False, hash=False
     )
-    """Per-call record of conflicts the agent has already been SHOWN, keyed by
-    slot fingerprint -> the conflicting appointment ids. Phase 11b: the backend
-    refuses a cross-doctor double-booking unless the agent echoes those ids, so a
-    write can only happen after the warning was actually disclosed. A fresh
-    ToolConfig is built per call, so this never leaks across callers."""
+    """Slot fingerprints (see _conflict_key) that have been DISCLOSED to the caller
+    as conflicting, keyed for the remainder of the call. Once a slot is refused,
+    no confirm=True retry can ever write it again.
+
+    ROOT CAUSE FIX (auto-book): the old Phase 11b design let the agent authorize a
+    cross-doctor double-booking by echoing back the conflicting appointment ids it
+    had been shown. That proof is replayable by the MODEL ALONE: the ids sit in
+    the chat context, so the LLM (or a weak mid-turn fallback model after a Groq
+    429 failover, see prod log 2026-09-26 00:36) can confabulate a patient "yes,
+    book it anyway" in its own voice and re-call the tool with confirm=True,
+    making the write go through with no real caller input. A per-turn gate cannot
+    stop this reliably (any later user turn, even "huh?", resets the turn id).
+
+    Instead we REMOVE the ack-echo capability entirely: a conflicted slot is
+    simply not writable on this call, deterministically, no matter what the model
+    does. Different-patient bookings are unaffected (they get a different phone ->
+    different fingerprint -> no conflict). Confabulated retries bounce off a cheap
+    local short-circuit instead of the backend. A fresh ToolConfig is built per
+    call, so this never leaks across callers."""
 
 
 def _conflict_key(doctor_name: str, date: str, time: str, phone: str) -> str:
-    """Fingerprint a requested slot so a conflict warning shown for it can be
-    matched to a later confirmed retry (Phase 11b). Digits-only phone so
+    """Fingerprint a requested slot so a conflict disclosed for it can be matched
+    to later retries and refused for the rest of the call. Digits-only phone so
     punctuation/whitespace differences don't break the match."""
     digits = re.sub(r"\D", "", phone or "")
     return f"{(doctor_name or '').strip().lower()}|{date}|{time}|{digits}"
@@ -416,10 +435,11 @@ def build_tools(config: ToolConfig) -> list:
         """Book an appointment. WRITES. Call only after the slot is confirmed open, the
         caller gave their real full name + phone, and they said yes to a read-back.
         `date` YYYY-MM-DD, `time` "HH:mm" matching an open slot, `phone` the
-        caller's number. If there is a conflict (same time already booked under a
-        different doctor) this tool itself announces the warning: do not repeat it,
-        do not re-call, and wait. Only if the caller then clearly says yes, call
-        again with `confirm` True."""
+        caller's number. If the caller attempts a time that is already booked for
+        the SAME name and number (a different doctor's slot), this tool announces
+        the clash and REFUSES the write — a conflicted booking can never be made on
+        this call, regardless of `confirm`. Do not re-call after a clash; wait for
+        the caller's reply (they can pick another time)."""
         _say_filler(context, "Okay, booking that now.")
         # Safety net: reject empty / obviously fake phone numbers.
         digits = re.sub(r"\D", "", phone or "")
@@ -429,6 +449,20 @@ def build_tools(config: ToolConfig) -> list:
                 "Please ask them for their phone number."
             )
         key = _conflict_key(doctor_name, date, time, phone)
+        # Deterministic auto-book kill: once this slot was disclosed to the caller
+        # as conflicting, no confirm=True retry can EVER write it on this call. The
+        # model cannot authorize a cross-doctor double-booking by re-echoing ids —
+        # the ack capability is gone. Different patients (different phone -> other
+        # key) are unaffected. This also makes a confabulated retry loop cheap:
+        # repeated confirms bounce here with a stable refusal instead of hitting
+        # the backend.
+        if bool(confirm) and key in config.conflict_refused:
+            # StopResponse: the agent must NOT generate any further text after a
+            # refused conflicted booking. This is what makes a confabulated
+            # confirm harmless end-to-end — the LLM never gets a turn to invent a
+            # "yes, book it anyway" line; the turn simply ends and we wait for the
+            # caller. The disclosure warning was already spoken + persisted.
+            raise StopResponse()
         body: dict[str, Any] = {
             "doctorName": doctor_name,
             "date": date,
@@ -436,18 +470,13 @@ def build_tools(config: ToolConfig) -> list:
             "phone": phone,
             "confirm": bool(confirm),
         }
-        # Phase 11b: echo the ids from a conflict we were shown earlier this call.
-        # Only sent when the model actually asks to proceed (confirm=True), so a
-        # premature confirm on the first call carries no ids and still gets refused.
-        if confirm and key in config.conflict_acks:
-            body["conflictAckIds"] = config.conflict_acks[key]
         if patient_name.strip():
             body["patientName"] = patient_name.strip()
         data = await _post(config, "book", body)
         if data is None:
             return "I couldn't complete the booking right now. A teammate will follow up."
         if data.get("booked"):
-            config.conflict_acks.pop(key, None)
+            config.conflict_refused.discard(key)
             appt = data.get("appointment") or {}
             who = appt.get("doctor", doctor_name)
             when_d = appt.get("date", date)
@@ -465,13 +494,13 @@ def build_tools(config: ToolConfig) -> list:
             return f"I couldn't find a doctor named {doctor_name}."
         if reason == "conflict":
             # Same patient already has a same-time appointment with a different
-            # doctor. Phase 11b: remember the ids we were shown (so a later
-            # confirmed retry can prove the warning was disclosed), and SPEAK the
-            # warning from here so it is heard even if the model stays silent.
+            # doctor. Flag the slot as unwritable for the rest of the call and
+            # SPEAK the warning from here so it is heard even if the model stays
+            # silent. The caller can still legitimately redirect (different phone
+            # -> different fingerprint), but this slot can no longer be booked —
+            # not by re-echoing ids, not by any confirm, not by a fallback model.
+            config.conflict_refused.add(key)
             conflicts = data.get("conflicts") or []
-            ids = [c["appointmentId"] for c in conflicts if c.get("appointmentId")]
-            if ids:
-                config.conflict_acks[key] = ids
             parts = [
                 f"{c.get('doctor')} on {c.get('date')} at {c.get('time')}"
                 for c in conflicts
@@ -479,21 +508,24 @@ def build_tools(config: ToolConfig) -> list:
             if parts:
                 warning = (
                     f"Heads up — this name and number already have an appointment "
-                    f"at that same time with {', '.join(parts)}. Are you booking "
-                    "this one for someone else, and do you still want to go ahead?"
+                    f"at that same time with {', '.join(parts)}. This booking "
+                    "cannot be made on this call — a teammate will call back to "
+                    "sort it out. Is there another time that works, or is this for "
+                    "someone else?"
                 )
             else:
                 warning = (
                     f"It looks like {patient_name.strip() or 'this patient'} already "
-                    "has an appointment at that time. Do you still want to book this one?"
+                    "has an appointment at that time. This booking can't be made on "
+                    "this call — a teammate will call back to sort it out."
                 )
-            _say_filler(context, warning)
-            return (
-                "I have just told the caller about the existing appointment and asked "
-                "whether it's for someone else and whether they still want to go ahead. "
-                "Do NOT repeat that warning and do NOT call book_appointment again — "
-                "wait for their next reply."
-            )
+            _say_filler(context, warning, add_to_chat_ctx=True)
+            # StopResponse: after announcing the clash in the agent's own voice,
+            # END the turn with no further LLM generation. The model never gets to
+            # confabulate a patient "yes, book it anyway" (prod log 2026-09-26
+            # 00:36: the model literally said both sides of the exchange). The
+            # caller hears the heads-up, the agent falls silent and waits.
+            raise StopResponse()
         if reason == "slot_taken":
             return "Sorry, that time was just taken. Would you like another time?"
         # slot_unavailable
@@ -551,12 +583,18 @@ def build_tools(config: ToolConfig) -> list:
         Call only after you looked it up, confirmed the NEW time is open, read the
         move back, and the caller said yes. `date`/`time` are the CURRENT date
         (YYYY-MM-DD) and time ("HH:mm"); `new_date`/`new_time` the new ones;
-        `phone` the number it's under. On a conflict (new time clashes with the
-        caller's booking under a different doctor) this tool itself announces the
-        warning: do not repeat it, do not re-call, and wait. Only if the caller then
-        clearly says they want it anyway, call again with `confirm` True."""
+        `phone` the number it's under. If the new time clashes with the caller's
+        booking under a different doctor, this tool announces the clash and REFUSES
+        the move — a clashing move can never be made on this call, regardless of
+        `confirm`. Do not re-call after a clash; wait for the caller's reply."""
         _say_filler(context, "Okay, let me move that for you.")
         key = _conflict_key(doctor_name, new_date, new_time, phone)
+        # Deterministic auto-book kill, same as book_appointment: a target slot
+        # disclosed as clashing is unwritable for the rest of the call.
+        if bool(confirm) and key in config.conflict_refused:
+            # StopResponse — see book_appointment: never let the model spin out
+            # more text (or another tool call) after a refused clash.
+            raise StopResponse()
         body: dict[str, Any] = {
             "doctorName": doctor_name,
             "date": date,
@@ -566,14 +604,11 @@ def build_tools(config: ToolConfig) -> list:
             "phone": phone,
             "confirm": bool(confirm),
         }
-        # Phase 11b: echo the ids from a conflict we were shown earlier this call.
-        if confirm and key in config.conflict_acks:
-            body["conflictAckIds"] = config.conflict_acks[key]
         data = await _post(config, "reschedule", body)
         if data is None:
             return "I couldn't reschedule that right now. A teammate will follow up."
         if data.get("rescheduled"):
-            config.conflict_acks.pop(key, None)
+            config.conflict_refused.discard(key)
             appt = data.get("appointment") or {}
             who = appt.get("doctor", doctor_name)
             when_d = appt.get("date", new_date)
@@ -589,10 +624,8 @@ def build_tools(config: ToolConfig) -> list:
                 f"under {phone}. Could you double-check those details?"
             )
         if reason == "conflict":
+            config.conflict_refused.add(key)
             conflicts = data.get("conflicts") or []
-            ids = [c["appointmentId"] for c in conflicts if c.get("appointmentId")]
-            if ids:
-                config.conflict_acks[key] = ids
             parts = [
                 f"{c.get('doctor')} on {c.get('date')} at {c.get('time')}"
                 for c in conflicts
@@ -600,20 +633,20 @@ def build_tools(config: ToolConfig) -> list:
             if parts:
                 warning = (
                     "Heads up — that new time clashes with an appointment this "
-                    f"number already has with {', '.join(parts)}. Do you still want "
-                    "to move it there anyway, or pick a different time?"
+                    f"number already has with {', '.join(parts)}. It can't be moved "
+                    "there on this call — a teammate will call back to sort it out. "
+                    "Would you like to pick a different time?"
                 )
             else:
                 warning = (
                     "That new time already overlaps another appointment under this "
-                    "number. Do you still want to move it there?"
+                    "number. It can't be moved there on this call — a teammate will "
+                    "call back to sort it out."
                 )
-            _say_filler(context, warning)
-            return (
-                "I have just told the caller about the clash and asked whether they "
-                "still want to move it. Do NOT repeat that warning and do NOT call "
-                "reschedule_appointment again — wait for their next reply."
-            )
+            _say_filler(context, warning, add_to_chat_ctx=True)
+            # StopResponse — end the turn after announcing the clash; the model
+            # must not get to fabricate consent or re-call.
+            raise StopResponse()
         if reason == "slot_taken":
             return f"Sorry, {new_time} on {new_date} was just taken. Want to pick another time?"
         # slot_unavailable
