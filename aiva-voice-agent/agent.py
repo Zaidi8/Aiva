@@ -64,6 +64,7 @@ from clinic_context import (
     render_greeting,
     render_system_prompt,
 )
+from handoff import RoomHandoff
 from speech_filter import sanitize_for_speech
 from tools import ToolConfig, build_tools
 
@@ -668,9 +669,18 @@ async def entrypoint(ctx: JobContext) -> None:
             handle_rescheduling=bool(
                 (context.get("ai") or {}).get("handleRescheduling", False)
             ),
+            # Human escalation (AiSettings.escalateToHuman) + the two keys the
+            # escalation webhook needs to point staff at THIS room: the LiveKit
+            # room the caller is in, and the provider call id the backend
+            # correlates the CallLog row by.
+            escalate_to_human=bool(
+                (context.get("ai") or {}).get("escalateToHuman", True)
+            ),
+            room_name=ctx.room.name,
+            provider_call_id=provider_call_id,
         )
     )
-    logger.info("Loaded %d read-only tools: %s", len(tools), [t.info.name for t in tools])
+    logger.info("Loaded %d tools: %s", len(tools), [t.info.name for t in tools])
 
     agent = AivaAgent(instructions=system_prompt, tools=tools)
 
@@ -705,6 +715,7 @@ async def entrypoint(ctx: JobContext) -> None:
     @session.on("close")
     def _on_close(_event: CloseEvent) -> None:
         silence_escalation.close()
+        handoff.close()
         call_logger._spawn(call_logger.record_end())
 
     # Phase 9: watchdog for a caller who never speaks. Without it the agent can
@@ -713,6 +724,21 @@ async def entrypoint(ctx: JobContext) -> None:
     # re-engage, then hangs up gracefully.
     silence_escalation = SilenceEscalation()
     silence_escalation.install(session, shutdown_fnc=ctx.shutdown)
+
+    # Human escalation: watch the room for a staff member joining. When one does,
+    # handoff.py interrupts the agent, swaps in a no-op agent, and unpublishes
+    # our audio track, then calls the on_handed_off hook below.
+    handoff = RoomHandoff()
+
+    def _on_handed_off() -> None:
+        # The silence watchdog must die the moment a person takes over. A human
+        # pausing to think sounds exactly like a caller going quiet, and the
+        # watchdog would ask "are you still there?" over a colleague who has
+        # only just said hello.
+        silence_escalation.close()
+        logger.info("call handed off to a human colleague — agent standing down")
+
+    handoff.install(ctx.room, session, on_handed_off=_on_handed_off)
 
     await session.say(greeting, allow_interruptions=True)
 

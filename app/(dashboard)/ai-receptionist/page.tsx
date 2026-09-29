@@ -30,6 +30,20 @@ export default async function AIReceptionistRoute() {
     startedAt: c.startedAt.toISOString(),
     endedAt: c.endedAt ? c.endedAt.toISOString() : null,
     patient: c.patient ? { id: c.patient.id, fullName: c.patient.fullName } : null,
+    // Human hand-off record for this call, if the agent escalated it. Drives
+    // the "Needs a human" badge and the Take/Join call actions. The UI only
+    // needs the five fields below — the staff-scoped ids (clinicId, callLogId)
+    // are deliberately not sent to the client.
+    escalation: c.escalation
+      ? {
+          id: c.escalation.id,
+          reason: c.escalation.reason,
+          status: c.escalation.status,
+          detail: c.escalation.detail,
+          roomName: c.escalation.roomName,
+          createdAt: c.escalation.createdAt.toISOString(),
+        }
+      : null,
   }));
 
   return (

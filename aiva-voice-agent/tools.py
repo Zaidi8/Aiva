@@ -1,9 +1,9 @@
-"""Aiva — Phase 3 read-only LLM tools.
+"""Aiva — read + write LLM tools.
 
 Each tool is an async function the LLM can call mid-conversation. They do an
-aiohttp GET to a read-only /api/voice/* endpoint (same x-webhook-secret auth as
-Phase 2) and return a *compact, speakable string* — never raw JSON — so the LLM
-can read the answer aloud directly.
+aiohttp GET/POST to a /api/voice/* endpoint (same x-webhook-secret auth as the
+clinic-context fetch) and return a *compact, speakable string* — never raw JSON —
+so the LLM can read the answer aloud directly.
 
 Design notes:
   - `build_tools(config)` is a factory: it closes over the backend URL, clinic
@@ -13,14 +13,20 @@ Design notes:
     drops the call.
   - Per-tool timing is logged at INFO (`tool=… elapsed_ms=…`) to feed the
     deferred latency pass. We measure here; we do not optimize.
+  - Human escalation is deterministic, not model-gated: once `config.escalated`
+    latches, every tool short-circuits with StopResponse, so the LLM can never
+    keep booking after handoff was requested (same reasoning as
+    `conflict_refused` — see its docstring).
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any
 
 import aiohttp
@@ -65,6 +71,36 @@ def _say_filler(context: RunContext, text: str, *, add_to_chat_ctx: bool = False
 _TIMEOUT_S = 8.0
 _HEADER_SECRET = "x-webhook-secret"
 
+# Spoken once, by us, the moment the agent decides to hand the call over. Kept
+# in the agent's own voice (add_to_chat_ctx) so the exact line the caller heard
+# is what the LLM sees afterwards and what lands in the persisted transcript.
+# Deliberately does NOT promise a call-back: a colleague is joining THIS call.
+_HANDOFF_LINE = (
+    "Let me get a colleague to take over for you — hang on a moment."
+)
+# Used when the backend declines to record the escalation (clinic has the
+# feature switched off). The agent still stops taking bookings — it has already
+# committed to handing off — but the promise is a call-back, which is the most
+# the clinic can honour.
+_HANDOFF_LINE_UNAVAILABLE = (
+    "Let me get a colleague to call you back about this as soon as they can."
+)
+
+# How many consecutive soft failures of the same scheduling tool before the
+# agent escalates on its own. Two is the smallest number that is clearly not
+# "the caller asked for a slightly different time" — that is a single
+# not_found/slot_unavailable and is answered conversationally, not escalated.
+# Three felt too patient for a caller already frustrated enough to ask twice.
+_FAILURE_STREAK_LIMIT = 2
+
+# The EscalationReason values the backend accepts (Prisma enum member names).
+_ESCALATION_REASONS = {
+    "caller_request": "CallerRequested",
+    "tool_failure_streak": "ToolFailureStreak",
+    "failed_booking": "FailedBooking",
+    "emergency": "Emergency",
+}
+
 
 @dataclass(frozen=True)
 class ToolConfig:
@@ -81,7 +117,40 @@ class ToolConfig:
     handle_rescheduling: bool = False
     """Whether this clinic lets the agent reschedule/cancel (AiSettings.
     handleRescheduling). When False, `reschedule_appointment` and
-    `cancel_appointment` are NOT exposed to the LLM."""
+    `cancel_appointment` are NOT exposed to the LLM, and the agent never
+    auto-escalates."""
+    escalate_to_human: bool = True
+    """Whether this clinic accepts human escalations (AiSettings.escalateToHuman).
+    When False, `escalate_to_human` is NOT exposed to the LLM and the
+    deterministic triggers (repeated tool failures, a parked booking) stay
+    dormant — the agent keeps handling the call itself."""
+    room_name: str = ""
+    """The LiveKit room this call is running in. Sent with the escalation so
+    staff can be issued a join token for exactly this room. A fresh
+    ToolConfig is built per call, so it never leaks across callers."""
+    provider_call_id: str = ""
+    """The provider's id for this call (SIP call-id, else the room name). The
+    backend correlates the escalation to the CallLog row by this, the same key
+    the rest of the call lifecycle uses — so the AI Receptionist page badges the
+    exact call the caller is still on."""
+    escalated: bool = False
+    """Latches True the first time this call is handed to a human — whether by
+    the model's escalate_to_human call, two consecutive scheduling-tool
+    failures, or a write that exhausted its retries and got parked.
+
+    Same reasoning as `conflict_refused`: after handoff the agent must not keep
+    working the call. Every tool calls `_guard_handoff` first and raises
+    StopResponse, so the model cannot book/cancel/look anything up after it has
+    asked for a human. A frozen dataclass can't rebind the flag, so it is
+    swapped via object.__setattr__ in `_escalate` (same trick the framework's
+    own per-call config relies on for its mutable state)."""
+    fail_streak: dict[str, int] = field(
+        default_factory=dict, compare=False, hash=False
+    )
+    """Consecutive soft failures per scheduling tool, cleared on any success.
+    At _FAILURE_STREAK_LIMIT the agent escalates WITHOUT asking the model —
+    a fallback LLM mid-conversation is exactly the wrong thing to trust with a
+    decision to give up on a caller."""
     conflict_refused: set[str] = field(
         default_factory=set, compare=False, hash=False
     )
@@ -164,7 +233,12 @@ _WRITE_MAX_ATTEMPTS = 3
 _WRITE_BACKOFF_FIRST_MS = 400
 
 
-async def _post(config: ToolConfig, path: str, body: dict[str, Any]) -> dict[str, Any] | None:
+async def _post(
+    config: ToolConfig,
+    path: str,
+    body: dict[str, Any],
+    context: RunContext | None = None,
+) -> dict[str, Any] | None:
     """POST {backend}/api/voice/{path} with a JSON body. Returns `data`, or None on failure.
 
     Used by write tools (booking). Same fail-soft + timing-log contract as _get,
@@ -174,6 +248,9 @@ async def _post(config: ToolConfig, path: str, body: dict[str, Any]) -> dict[str
       2. If every retry fails, persist the unresolved request to the backend's
          /failed-booking endpoint (best-effort) so it can be reconciled later
          instead of vanishing — important when the caller has already hung up.
+         Parking also escalates the live call, because a booking the caller was
+         just promised is exactly what a human should finish by hand; that needs
+         `context` to speak, hence the optional argument.
     The clinicId is injected here so the LLM never has to supply it.
     """
     import asyncio
@@ -234,7 +311,7 @@ async def _post(config: ToolConfig, path: str, body: dict[str, Any]) -> dict[str
         "tool=%s method=POST giving up after %d attempts — parking for reconciliation.",
         path, _WRITE_MAX_ATTEMPTS,
     )
-    await _park_failed_booking(config, path, body, last_status, last_error)
+    await _park_failed_booking(config, path, body, last_status, last_error, context)
     return None
 
 
@@ -244,6 +321,7 @@ async def _park_failed_booking(
     body: dict[str, Any],
     last_status: int | None,
     last_error: str | None,
+    context: RunContext | None = None,
 ) -> None:
     """Best-effort: record an unresolvable write so it can be reconciled later.
 
@@ -251,6 +329,14 @@ async def _park_failed_booking(
     /failed-booking endpoint writes to the `failed_booking` table; if even that
     fails, the failure is only logged locally (the offline case can't be parked
     anywhere durable).
+
+    A successfully parked write is ALSO escalated: the caller is still on the
+    line having been told their appointment is being made, and the thing they
+    were promised cannot be made by an agent at this clinic right now. That is
+    the definition of "get a human", so the parked call is flagged for the AI
+    Receptionist page instead of quietly dying. Escalation last, and only if
+    parking worked, so a clinic whose backend is fully down doesn't get flagged
+    for a call it can also do nothing about.
     """
     action = {"book": "book", "cancel": "cancel", "reschedule": "reschedule"}.get(path, path)
     detail = f"status={last_status}" if last_status is not None else f"error={last_error}"
@@ -273,10 +359,159 @@ async def _park_failed_booking(
                         "failed-booking park status=%d body=%s",
                         resp.status, (await resp.text())[:200],
                     )
-                else:
-                    logger.info("failed-booking parked action=%s", action)
+                    return
+                logger.info("failed-booking parked action=%s", action)
     except Exception as exc:  # noqa: BLE001 — never let parking break the call
         logger.warning("failed-booking park failed (action=%s): %s", action, exc)
+        return
+
+    if context is not None and config.escalate_to_human:
+        # The write the caller was promised could not be made. A human finishes
+        # it; the agent stops working the call.
+        await _escalate(
+            config,
+            context,
+            "failed_booking",
+            f"{action} could not be saved after {_WRITE_MAX_ATTEMPTS} attempts ({detail})",
+        )
+
+
+# ── Human escalation ───────────────────────────────────────────────────────────
+# Three triggers, one funnel:
+#   1. the MODEL decides (caller asked for a person / an emergency), via the
+#      escalate_to_human tool;
+#   2. two consecutive scheduling-tool soft failures — the agent gives up on
+#      handling it alone, WITHOUT asking the model (a mid-conversation fallback
+#      LLM is the last thing we want deciding to abandon a caller);
+#   3. a write that exhausted _WRITE_MAX_ATTEMPTS and got parked — the booking
+#      the caller was promised cannot be made by an agent at this clinic.
+# All three end in _escalate(), which latches, tells the backend, speaks one
+# line, and raises StopResponse. After that the agent is out of the conversation.
+
+
+def _guard_handoff(config: ToolConfig) -> None:
+    """Refuse all further tool work once this call has been handed to a human.
+
+    Every tool calls this first. Without it the model could keep "helpfully"
+    booking after a colleague was already on the line — the exact class of
+    double-handling `conflict_refused` exists to prevent. StopResponse ends the
+    turn with no LLM generation, so the model never gets a chance to talk over
+    the human.
+    """
+    if config.escalated:
+        raise StopResponse()
+
+
+async def _escalate(
+    config: ToolConfig,
+    context: RunContext,
+    reason_key: str,
+    detail: str,
+) -> None:
+    """Hand this call to a human. Latches, records, speaks one line, stops the turn.
+
+    Never raises (except StopResponse, which is the point) and never returns to
+    its caller — it always ends the turn.
+
+    `reason_key` maps through _ESCALATION_REASONS to the backend's Prisma enum.
+    If the clinic has escalation switched off the backend answers
+    `{escalated: false}` and the LATCH STILL SETS: the agent has already told
+    the caller a colleague is coming, so it must not go back to booking. It just
+    promises a call-back instead of a hand-over, which is all such a clinic can
+    honour.
+    """
+    if config.escalated:
+        # Second trigger fired after the first already handed off. Do not
+        # re-notify staff (and do not speak a second line over the first).
+        raise StopResponse()
+
+    # Latch FIRST, before the network call. A slow/unreachable backend must not
+    # let the model retry the tool and escalate twice.
+    object.__setattr__(config, "escalated", True)
+    reason = _ESCALATION_REASONS[reason_key]
+    detail = (detail or "").strip()[:500]
+    logger.info(
+        "escalating to human reason=%s detail=%s room=%s", reason, detail, config.room_name
+    )
+
+    recorded = False
+    try:
+        # Single attempt, no retry: escalating twice would double-badge the call,
+        # and the unique callLogId index means a retry cannot help anyway.
+        url = f"{config.backend_url.rstrip('/')}/api/voice/escalate"
+        async with aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=_TIMEOUT_S, connect=3.0)
+        ) as session:
+            async with session.post(
+                url,
+                json={
+                    "clinicId": config.clinic_id,
+                    # Deterministic per call + reason: a retried POST (or a retry
+                    # after a network blip) is deduped by the backend's
+                    # WebhookEvent idempotency instead of erroring.
+                    "eventId": f"{config.provider_call_id}.escalate.{reason_key}",
+                    "providerCallId": config.provider_call_id,
+                    "reason": reason,
+                    "detail": detail,
+                    "roomName": config.room_name,
+                    "at": datetime.now(timezone.utc).isoformat(),
+                },
+                headers={_HEADER_SECRET: config.webhook_secret},
+            ) as resp:
+                body = await resp.text()
+                if resp.status == 200:
+                    try:
+                        recorded = bool((json.loads(body).get("data") or {}).get("escalated"))
+                    except (ValueError, AttributeError):
+                        recorded = True  # 200 — treat as recorded
+                else:
+                    logger.warning(
+                        "escalation webhook status=%d body=%s", resp.status, body[:200]
+                    )
+    except Exception as exc:  # noqa: BLE001 — the handoff line still goes out
+        logger.warning("escalation webhook failed (non-fatal): %s", exc)
+
+    # Speak from here rather than returning text, so the caller hears it even if
+    # the model (or a fallback model) would have said nothing, and the exact line
+    # is persisted in the transcript.
+    _say_filler(context, _HANDOFF_LINE if recorded else _HANDOFF_LINE_UNAVAILABLE,
+                add_to_chat_ctx=True)
+    # StopResponse: the turn ends here. No LLM generation, no second sentence, no
+    # "actually, is 4:30 ok?" after we promised a colleague. From now on
+    # _guard_handoff bounces every tool.
+    raise StopResponse()
+
+
+async def _note_tool_result(
+    config: ToolConfig,
+    context: RunContext,
+    key: str,
+    succeeded: bool,
+) -> None:
+    """Track consecutive scheduling-tool soft failures; escalate at the limit.
+
+    `succeeded=False` means the tool hit a *soft* failure — a timeout, a 5xx, an
+    unresolved doctor, no open slots. Those are the ones that mean "the agent
+    can't do this for you right now", which is exactly when a human should take
+    over. A caller simply not finding a suitable slot is NOT a failure: that
+    path reports a successful lookup, so the streak only builds when the backend
+    is actually misbehaving.
+    """
+    if not config.escalate_to_human:
+        return
+    if succeeded:
+        config.fail_streak.pop(key, None)
+        return
+    streak = config.fail_streak.get(key, 0) + 1
+    config.fail_streak[key] = streak
+    logger.info("tool=%s soft-failure streak=%d/%d", key, streak, _FAILURE_STREAK_LIMIT)
+    if streak >= _FAILURE_STREAK_LIMIT:
+        await _escalate(
+            config,
+            context,
+            "tool_failure_streak",
+            f"{key} failed {streak} times in a row",
+        )
 
 
 def build_tools(config: ToolConfig) -> list:
@@ -286,6 +521,7 @@ def build_tools(config: ToolConfig) -> list:
     async def list_doctors(query: str = "") -> str:
         """List the clinic's doctors. `query` is the caller's search term (name or
         kind, e.g. "cardiologist"), or empty to list everyone."""
+        _guard_handoff(config)
         params = {"q": query} if query.strip() else {}
         data = await _get(config, "doctors", params)
         if data is None:
@@ -318,6 +554,7 @@ def build_tools(config: ToolConfig) -> list:
         `from_time`/`to_time` ("HH:mm", 24h; either may be empty for half-open) to
         get which slots inside are open plus the nearest outside each edge. Use at
         most ONE of `time` and the from/to pair. Read-only."""
+        _guard_handoff(config)
         _say_filler(context, "Let me check that for you.")
         params = {"doctorName": doctor_name, "date": date}
         if time.strip():
@@ -331,13 +568,18 @@ def build_tools(config: ToolConfig) -> list:
                 params["to"] = to_time.strip()
         data = await _get(config, "availability", params)
         if data is None:
+            await _note_tool_result(config, context, "check_availability", False)
             return "I couldn't check availability right now."
         if not data.get("resolved"):
+            await _note_tool_result(config, context, "check_availability", False)
             reason = data.get("reason")
             if reason == "ambiguous":
                 names = ", ".join(data.get("candidates") or [])
                 return f"There are a few matching doctors: {names}. Which one did you mean?"
             return f"I couldn't find a doctor named {doctor_name}."
+        # A resolved lookup — including "no open slots" — is a working backend
+        # answering correctly, so it clears any failure streak.
+        await _note_tool_result(config, context, "check_availability", True)
         doctor = (data.get("doctor") or {}).get("name", doctor_name)
 
         # Time-specific path (Phase 5 #3/#4): answer about the requested time only.
@@ -406,6 +648,7 @@ def build_tools(config: ToolConfig) -> list:
         """Find the caller's upcoming appointments by `phone`. Use FIRST when they want
         to cancel or move one, so you have the exact doctor, date, and time.
         Read-only."""
+        _guard_handoff(config)
         _say_filler(context, "Let me pull that up.")
         data = await _get(config, "appointments", {"phone": phone})
         if data is None:
@@ -440,6 +683,7 @@ def build_tools(config: ToolConfig) -> list:
         the clash and REFUSES the write — a conflicted booking can never be made on
         this call, regardless of `confirm`. Do not re-call after a clash; wait for
         the caller's reply (they can pick another time)."""
+        _guard_handoff(config)
         _say_filler(context, "Okay, booking that now.")
         # Safety net: reject empty / obviously fake phone numbers.
         digits = re.sub(r"\D", "", phone or "")
@@ -472,10 +716,14 @@ def build_tools(config: ToolConfig) -> list:
         }
         if patient_name.strip():
             body["patientName"] = patient_name.strip()
-        data = await _post(config, "book", body)
+        data = await _post(config, "book", body, context)
         if data is None:
+            # _post already parked the write and escalated (which raised
+            # StopResponse) when escalation is on. Reached only when the clinic
+            # has it off — the caller still gets the "someone will call" line.
             return "I couldn't complete the booking right now. A teammate will follow up."
         if data.get("booked"):
+            await _note_tool_result(config, context, "book_appointment", True)
             config.conflict_refused.discard(key)
             appt = data.get("appointment") or {}
             who = appt.get("doctor", doctor_name)
@@ -489,8 +737,10 @@ def build_tools(config: ToolConfig) -> list:
         reason = data.get("reason")
         if reason == "ambiguous":
             names = ", ".join(data.get("candidates") or [])
+            await _note_tool_result(config, context, "book_appointment", False)
             return f"There are a few matching doctors: {names}. Which one did you mean?"
         if reason == "not_found":
+            await _note_tool_result(config, context, "book_appointment", False)
             return f"I couldn't find a doctor named {doctor_name}."
         if reason == "conflict":
             # Same patient already has a same-time appointment with a different
@@ -527,8 +777,10 @@ def build_tools(config: ToolConfig) -> list:
             # caller hears the heads-up, the agent falls silent and waits.
             raise StopResponse()
         if reason == "slot_taken":
+            await _note_tool_result(config, context, "book_appointment", True)
             return "Sorry, that time was just taken. Would you like another time?"
         # slot_unavailable
+        await _note_tool_result(config, context, "book_appointment", True)
         return f"{doctor_name} doesn't have {time} open on {date}. Want to pick another time?"
 
     @function_tool
@@ -543,11 +795,13 @@ def build_tools(config: ToolConfig) -> list:
         it up, read it back, and the caller said yes. `date`/`time` are that
         appointment's date (YYYY-MM-DD) and time ("HH:mm"); `phone` the number
         it's under."""
+        _guard_handoff(config)
         _say_filler(context, "Okay, let me cancel that.")
         data = await _post(
             config,
             "cancel",
             {"doctorName": doctor_name, "date": date, "time": time, "phone": phone},
+            context,
         )
         if data is None:
             return "I couldn't cancel that right now. A teammate will follow up."
@@ -587,6 +841,7 @@ def build_tools(config: ToolConfig) -> list:
         booking under a different doctor, this tool announces the clash and REFUSES
         the move — a clashing move can never be made on this call, regardless of
         `confirm`. Do not re-call after a clash; wait for the caller's reply."""
+        _guard_handoff(config)
         _say_filler(context, "Okay, let me move that for you.")
         key = _conflict_key(doctor_name, new_date, new_time, phone)
         # Deterministic auto-book kill, same as book_appointment: a target slot
@@ -604,7 +859,7 @@ def build_tools(config: ToolConfig) -> list:
             "phone": phone,
             "confirm": bool(confirm),
         }
-        data = await _post(config, "reschedule", body)
+        data = await _post(config, "reschedule", body, context)
         if data is None:
             return "I couldn't reschedule that right now. A teammate will follow up."
         if data.get("rescheduled"):
@@ -655,6 +910,30 @@ def build_tools(config: ToolConfig) -> list:
             "Want to pick another time?"
         )
 
+    @function_tool
+    async def escalate_to_human(context: RunContext, reason: str = "caller_request") -> str:
+        """Hand the caller to a human colleague, on THIS call. Call this ONLY when:
+          - `reason` is "caller_request": the caller asked for a person ("let me
+            talk to a human", "are you a bot?", "I want to complain").
+          - `reason` is "emergency": the caller describes a medical emergency or
+            is in distress (chest pain, can't breathe, bleeding, a fall, feels
+            unsafe). Pass anything else only if you are unsure — prefer
+            "caller_request".
+        A colleague is alerted and joins the call, so do NOT say goodbye, do NOT
+        promise a call-back, and do not offer to keep looking things up. After
+        calling this the call is over as far as you are concerned: the handoff
+        message is spoken for you and your turn ends.
+        """
+        key = "emergency" if str(reason).strip().lower() == "emergency" else "caller_request"
+        detail = (
+            "caller described a medical emergency"
+            if key == "emergency"
+            else "caller asked for a person"
+        )
+        # Never returns — _escalate speaks the handoff line and raises
+        # StopResponse, so the model cannot add a farewell on top of it.
+        await _escalate(config, context, key, detail)
+
     tools: list = [
         list_doctors,
         check_availability,
@@ -665,4 +944,10 @@ def build_tools(config: ToolConfig) -> list:
     if config.handle_rescheduling:
         tools.append(cancel_appointment)
         tools.append(reschedule_appointment)
+    if config.escalate_to_human:
+        # Not exposed when the clinic has escalation off, so the model cannot
+        # even ask for a hand-off the backend would refuse. The deterministic
+        # triggers inside _note_tool_result / _park_failed_booking are gated on
+        # the same flag.
+        tools.append(escalate_to_human)
     return tools

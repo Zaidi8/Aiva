@@ -61,6 +61,7 @@ interface InitialAiSettings {
   sendConfirmations: boolean;
   handleRescheduling: boolean;
   emergencyTransfer: boolean;
+  escalateToHuman: boolean;
 }
 
 interface SettingsPageProps {
@@ -340,6 +341,7 @@ export function SettingsPage({
         sendConfirmations: values.sendConfirmations,
         handleRescheduling: values.handleRescheduling,
         emergencyTransfer: values.emergencyTransfer,
+        escalateToHuman: values.escalateToHuman,
       });
       toast.success('AI receptionist settings saved.');
       router.refresh();
@@ -728,6 +730,7 @@ export function SettingsPage({
                     { key: 'sendConfirmations' as const, label: 'Send confirmations', description: 'Automatically send appointment confirmations' },
                     { key: 'handleRescheduling' as const, label: 'Handle rescheduling', description: 'Let AI manage appointment rescheduling' },
                     { key: 'emergencyTransfer' as const, label: 'Emergency transfers', description: 'Transfer emergency cases to staff immediately' },
+                    { key: 'escalateToHuman' as const, label: 'Hand over to a person', description: 'When the AI cannot help — or the caller asks — flag the call and let a receptionist take it live' },
                   ].map((setting) => (
                     <ToggleRow
                       key={setting.key}

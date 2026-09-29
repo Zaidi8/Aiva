@@ -31,6 +31,7 @@ import {
   Calendar,
   FileText,
   ChevronRight,
+  UserCheck,
 } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
@@ -67,6 +68,19 @@ interface ApiCallLog {
   startedAt: string;
   endedAt: string | null;
   patient: { id: string; fullName: string } | null;
+  // Set when the agent handed this call to a human (or tried to). Drives the
+  // "Needs a human" badge and the Join call button. Null on every ordinary call.
+  escalation: CallEscalation | null;
+}
+
+interface CallEscalation {
+  id: string;
+  reason: 'CallerRequested' | 'ToolFailureStreak' | 'FailedBooking' | 'Emergency';
+  status: 'Requested' | 'Claimed' | 'Resolved';
+  detail: string | null;
+  /** The LiveKit room the caller is/was in. Null = the call can't be joined. */
+  roomName: string | null;
+  createdAt: string;
 }
 
 interface DashboardSummary {
@@ -157,7 +171,13 @@ function intentIcon(intent: ApiCallLog['detectedIntent']) {
   }
 }
 
-type BadgeVariant = 'success' | 'warning' | 'info' | 'destructive-soft';
+type BadgeVariant =
+  | 'success'
+  | 'warning'
+  | 'info'
+  | 'destructive'
+  | 'destructive-soft'
+  | 'secondary';
 
 // Map each call outcome to a soft, tinted status badge variant.
 function outcomeBadge(outcome: ApiCallLog['outcome']): {
@@ -179,6 +199,124 @@ function outcomeBadge(outcome: ApiCallLog['outcome']): {
 
 function intentLabel(intent: ApiCallLog['detectedIntent']): string {
   return intent ?? 'Unknown';
+}
+
+// Why the agent gave up. The reason is what tells a receptionist whether this is
+// "the caller wants to complain" or "our booking API is down" — very different
+// follow-ups, so it gets its own line in the detail panel rather than being
+// flattened into a generic badge.
+const ESCALATION_REASON_LABEL: Record<CallEscalation['reason'], string> = {
+  CallerRequested: 'Caller asked for a person',
+  ToolFailureStreak: 'Agent could not complete the request',
+  FailedBooking: 'Booking could not be saved',
+  Emergency: 'Possible emergency',
+};
+
+function escalationBadge(escalation: CallEscalation): {
+  label: string;
+  variant: BadgeVariant;
+} {
+  switch (escalation.status) {
+    case 'Claimed':
+      return { label: 'With a colleague', variant: 'info' };
+    case 'Resolved':
+      return { label: 'Handled', variant: 'secondary' };
+    case 'Requested':
+    default:
+      return { label: 'Needs a human', variant: 'destructive' };
+  }
+}
+
+/**
+ * The staff actions for an escalated call.
+ *
+ * "Join call" is the point of the whole feature: it claims the call, gets a
+ * room-scoped LiveKit token, and drops the staff member into the call the caller
+ * is still on. Both requests happen on the live page rather than here, so a
+ * token never passes through this component or the URL bar.
+ *
+ * "Mark handled" closes the escalation once the receptionist has dealt with it
+ * by phone, so the badge stops shouting at the next person who opens the page.
+ */
+function EscalationBanner({
+  callId,
+  escalation,
+}: {
+  callId: string;
+  escalation: CallEscalation;
+}) {
+  const router = useRouter();
+  const [isResolving, setIsResolving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // A call with no LiveKit room can't be joined — the agent may have escalated
+  // without a room (e.g. a config that predates the feature), and offering a
+  // button that 409s would be worse than not offering it.
+  const canJoin = Boolean(escalation.roomName);
+
+  const handleResolve = async () => {
+    setIsResolving(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/calls/${callId}/escalation`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'resolve' }),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as {
+          error?: { message?: string };
+        } | null;
+        setError(body?.error?.message ?? 'Could not mark this call as handled.');
+        return;
+      }
+      router.refresh();
+    } catch {
+      setError('Could not mark this call as handled.');
+    } finally {
+      setIsResolving(false);
+    }
+  };
+
+  return (
+    <div className="flex shrink-0 flex-col gap-2 border-b border-border bg-destructive-muted/40 px-6 py-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <UserCheck className="size-4 shrink-0 text-destructive" />
+          <span className="text-sm font-medium text-foreground">
+            {escalation.status === 'Claimed'
+              ? 'A colleague has taken this call'
+              : 'Handed to a human — nobody is on the line yet'}
+          </span>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          {canJoin ? (
+            <Button
+              size="sm"
+              onClick={() => router.push(`/ai-receptionist/live/${callId}`)}
+            >
+              <PhoneCall />
+              {escalation.status === 'Claimed' ? 'Join call' : 'Take this call'}
+            </Button>
+          ) : null}
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleResolve}
+            disabled={isResolving}
+          >
+            {isResolving ? 'Saving…' : 'Mark handled'}
+          </Button>
+        </div>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        {ESCALATION_REASON_LABEL[escalation.reason]}
+        {escalation.detail ? ` — ${escalation.detail}` : ''}
+        {!canJoin && ' · This call has no live room recorded, so it cannot be joined.'}
+      </p>
+      {error && <p className="text-xs text-destructive">{error}</p>}
+    </div>
+  );
 }
 
 export function AIReceptionistPage({
@@ -409,9 +547,16 @@ export function AIReceptionistPage({
                                         <h4 className="truncate text-sm font-medium text-foreground">
                                           {name}
                                         </h4>
-                                        <Badge variant={badge.variant}>
-                                          {badge.label}
-                                        </Badge>
+                                        <div className="flex shrink-0 items-center gap-1.5">
+                                          {call.escalation && (
+                                            <Badge variant={escalationBadge(call.escalation).variant}>
+                                              {escalationBadge(call.escalation).label}
+                                            </Badge>
+                                          )}
+                                          <Badge variant={badge.variant}>
+                                            {badge.label}
+                                          </Badge>
+                                        </div>
                                       </div>
                                       <p className="mb-1.5 truncate text-xs text-muted-foreground">
                                         {call.patientPhone}
@@ -503,6 +648,11 @@ export function AIReceptionistPage({
                     <Badge variant="secondary">{selectedCall.sentiment}</Badge>
                   )}
                 </div>
+
+                {selectedCall.escalation &&
+                  selectedCall.escalation.status !== 'Resolved' && (
+                    <EscalationBanner callId={selectedCall.id} escalation={selectedCall.escalation} />
+                  )}
 
                 <div className="flex-1 overflow-hidden">
                   <ScrollArea className="h-full">

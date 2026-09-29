@@ -55,6 +55,9 @@ export const clinicContextSchema = z.object({
     autoBook: z.boolean(),
     handleRescheduling: z.boolean(),
     emergencyTransfer: z.boolean(),
+    // Gates the agent's escalate_to_human tool and its automatic escalations
+    // (repeated tool failures, a parked booking).
+    escalateToHuman: z.boolean(),
   }),
   doctors: z.array(doctorSchema),
   services: z.array(z.never()),

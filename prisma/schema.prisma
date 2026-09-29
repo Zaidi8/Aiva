@@ -102,6 +102,25 @@ enum FailedBookingAction {
   reschedule
 }
 
+// Why the AI receptionist asked for a human on a call. Recorded on the
+// Escalation row so staff can triage at a glance and we can measure which
+// trigger actually fires.
+enum EscalationReason {
+  CallerRequested    // the caller explicitly asked for a person
+  ToolFailureStreak  // 2+ booking/availability tool calls failed back to back
+  FailedBooking      // a voice write exhausted its retries and got parked
+  Emergency          // the model judged the call an emergency
+}
+
+// Escalation lifecycle. `Requested` = the agent asked and the call is flagged
+// for staff; `Claimed` = a staff member has joined the LiveKit room (the caller
+// and staff are now talking directly); `Resolved` = closed out.
+enum EscalationStatus {
+  Requested
+  Claimed
+  Resolved
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // CLINIC — single row in single-clinic deployments. Holds clinic-level config.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -310,6 +329,11 @@ model CallLog {
   // without us inventing our own id, and gives an idempotency anchor.
   providerCallId String? @unique @map("provider_call_id")
 
+  // At most one escalation per call (Escalation.callLogId is unique). A
+  // relation rather than a mirrored status column, so the badge on the AI
+  // Receptionist page can never disagree with the escalation record itself.
+  escalation Escalation?
+
   @@index([clinicId])
   @@index([patientId])
   @@index([appointmentId])
@@ -362,6 +386,12 @@ model AiSettings {
   sendConfirmations    Boolean  @default(true) @map("send_confirmations")
   handleRescheduling   Boolean  @default(true) @map("handle_rescheduling")
   emergencyTransfer    Boolean  @default(true) @map("emergency_transfer")
+  // Master switch for human escalation. When false the agent is neither given
+  // the escalate_to_human tool nor allowed to auto-escalate on repeated tool
+  // failures / a parked booking — it keeps telling callers "a teammate will call
+  // you back" with nobody actually alerted. Gated exactly like autoBook /
+  // handleRescheduling (the agent reads it into its ToolConfig).
+  escalateToHuman      Boolean  @default(true) @map("escalate_to_human")
   createdAt            DateTime @default(now()) @map("created_at")
   updatedAt            DateTime @updatedAt @map("updated_at")
 
@@ -464,6 +494,56 @@ model FailedBooking {
   @@index([clinicId])
   @@index([resolvedAt])
   @@map("failed_booking")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ESCALATION — a live voice call the AI receptionist handed to a human.
+//
+// Same "park it, never lose it" philosophy as FailedBooking, but for a handoff
+// rather than a write: when the agent gives up (caller asked, repeated tool
+// failures, a parked booking, an emergency) it records the reason here, so the
+// call is flagged on the AI Receptionist page and staff can join THAT LiveKit
+// room while the caller is still on the line.
+//
+// The agent escalates AT MOST ONCE per call (its ToolConfig latches), so
+// `callLogId` is unique — one escalation per call, enforced at the DB level
+// rather than left to application code.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Escalation {
+  id      String           @id @default(cuid())
+  reason  EscalationReason
+  status  EscalationStatus @default(Requested)
+  detail  String? // short free text from the agent (what was asked / what went wrong)
+  // The LiveKit room the caller is sitting in. A staff member joins this room as
+  // a new participant to take the call — with no SIP trunk yet, "transfer" is a
+  // browser join, not a phone transfer. When a trunk is added only the final
+  // handoff step changes (WarmTransferTask dials a real number instead); the
+  // record, the webhook and this page are identical either way.
+  roomName String? @map("room_name")
+
+  // Required tenant key, taken from the CallLog the agent escalated on.
+  clinicId String @map("clinic_id")
+  // Who took the call. A plain scalar (like FailedBooking.clinicId) — a FK would
+  // add a back-relation to ClinicStaff for a field only ever read for display,
+  // and staff are soft-deleted rather than hard-deleted anyway.
+  claimedByStaffId String?   @map("claimed_by_staff_id")
+  claimedAt        DateTime? @map("claimed_at")
+  resolvedAt       DateTime? @map("resolved_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  callLogId String  @map("call_log_id")
+  callLog   CallLog @relation(fields: [callLogId], references: [id], onDelete: Cascade)
+
+  // No custom index name: Prisma's default (`escalation_call_log_id_key`) is
+  // what the migration creates and what Prisma tracks. A `name:` here that
+  // disagrees with the applied migration is silent drift — the next
+  // `migrate dev` would try to drop and recreate the index.
+  @@unique([callLogId])
+  @@index([clinicId, status])
+  @@index([createdAt])
+  @@map("escalation")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

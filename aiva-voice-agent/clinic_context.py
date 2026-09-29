@@ -307,6 +307,7 @@ def render_system_prompt(context: dict[str, Any], today: str | None = None) -> s
 
     auto_book = ai.get("autoBook", True)
     handle_rescheduling = ai.get("handleRescheduling", False)
+    escalate_to_human = ai.get("escalateToHuman", True)
 
     lines.append("# What you can do")
     if auto_book and handle_rescheduling:
@@ -408,6 +409,48 @@ def render_system_prompt(context: dict[str, Any], today: str | None = None) -> s
             "confirm=True; otherwise help them pick a different time."
         )
         lines.append(
+            "- If a booking or move cannot be completed for any reason, a human "
+            "teammate takes it from here — say a teammate will follow up and offer "
+            "a callback, and do NOT keep retrying the tool."
+        )
+    if escalate_to_human:
+        lines.append("# Handing over to a human (important)")
+        lines.append(
+            "You can put the caller straight through to a colleague ON THIS CALL "
+            "with escalate_to_human. A colleague is alerted immediately and joins "
+            "the call. Call it — and then say nothing else — when:"
+        )
+        lines.append(
+            "- The caller asks for a person: \"let me talk to a human/staff/a "
+            "real person\", \"are you a robot?\", \"I want to make a complaint\", or "
+            "they simply refuse to carry on with you. Use reason=\"caller_request\"."
+        )
+        lines.append(
+            "- The caller describes a medical emergency or is in distress (chest "
+            "pain, trouble breathing, bleeding, a fall, feels unsafe). Use "
+            "reason=\"emergency\". Keep any emergency-services advice you would "
+            "give anyway, THEN hand over — do not choose between the two."
+        )
+        lines.append(
+            "- The caller asks for something you genuinely cannot do (a "
+            "complaint, a refund, a prescription or dosage, a medical opinion, a "
+            "specific insurance answer). Use reason=\"caller_request\"."
+        )
+        lines.append(
+            "After you call escalate_to_human the handoff message is spoken FOR "
+            "you and your turn ends. So: do NOT say goodbye, do NOT promise a "
+            "call-back, do NOT offer to keep looking things up, and do NOT try to "
+            "carry on with the booking. The colleague is already there."
+        )
+        lines.append(
+            "- Do not use it just because a time is unavailable or a booking is "
+            "full — that is a normal part of the job; offer the nearest open times "
+            "instead. Hand over when a PERSON is what the caller needs, not when a "
+            "slot is."
+        )
+        lines.append("")
+    else:
+        lines.append(
             "- You can't transfer to a human; for anything you can't do, say a "
             "teammate will follow up and offer a callback."
         )
@@ -415,6 +458,12 @@ def render_system_prompt(context: dict[str, Any], today: str | None = None) -> s
         lines.append(
             "- Emergency: if the caller describes a medical emergency, tell them "
             "to hang up and call emergency services immediately."
+            + (
+                " Then hand the call over with escalate_to_human "
+                "(reason=\"emergency\") so a colleague picks it up."
+                if escalate_to_human
+                else ""
+            )
         )
         lines.append("")
 
@@ -428,12 +477,21 @@ def render_system_prompt(context: dict[str, Any], today: str | None = None) -> s
     lines.append(
         "- Insurance: never confirm or deny a specific plan. Say you don't have "
         "their insurance details, note that they'd like coverage checked, and "
-        "offer a call back from a teammate. Never claim coverage."
+        + (
+            "hand the call over with escalate_to_human so a colleague can check."
+            if escalate_to_human
+            else "offer a call back from a teammate. Never claim coverage."
+        )
     )
     lines.append(
         "- Prescriptions / medical advice: decline politely — a doctor or "
         "pharmacist must handle prescriptions, refills, dosages, or any medical "
-        "advice; offer a teammate callback instead."
+        "advice; "
+        + (
+            "hand the call over with escalate_to_human."
+            if escalate_to_human
+            else "offer a teammate callback instead."
+        )
     )
     lines.append(
         "- Privacy: if asked why you need their name or phone, answer honestly in "

@@ -64,6 +64,7 @@ async function SettingsPageContent({ tab }: { tab: string }) {
         sendConfirmations: aiSettings.sendConfirmations,
         handleRescheduling: aiSettings.handleRescheduling,
         emergencyTransfer: aiSettings.emergencyTransfer,
+        escalateToHuman: aiSettings.escalateToHuman,
       }}
       voiceGoLiveReady={voiceGoLiveReady}
     />

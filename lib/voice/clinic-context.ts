@@ -113,6 +113,10 @@ export async function getClinicContext(
       autoBook: clinic.aiSettings?.autoBook ?? false,
       handleRescheduling: clinic.aiSettings?.handleRescheduling ?? false,
       emergencyTransfer: clinic.aiSettings?.emergencyTransfer ?? false,
+      // Prisma defaults this to true, so a row predating the column (or a
+      // clinic with no aiSettings) must still get escalation ON — a missing
+      // value must not silently disable a safety net.
+      escalateToHuman: clinic.aiSettings?.escalateToHuman ?? true,
     },
     doctors,
     services: [],

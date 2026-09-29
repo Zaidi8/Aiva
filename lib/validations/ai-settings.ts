@@ -9,6 +9,7 @@ export const updateAiSettingsSchema = z.object({
   sendConfirmations: z.boolean().optional(),
   handleRescheduling: z.boolean().optional(),
   emergencyTransfer: z.boolean().optional(),
+  escalateToHuman: z.boolean().optional(),
 });
 
 export type UpdateAiSettingsInput = z.infer<typeof updateAiSettingsSchema>;

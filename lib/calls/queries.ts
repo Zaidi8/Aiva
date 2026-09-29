@@ -4,6 +4,7 @@ import "server-only";
 import type { CallLog, ClinicStaff } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { clinicWhere } from "@/lib/clinic-scope";
+import { escalationSelect, type EscalationSummary } from "./escalations";
 
 export interface ListCallsOptions {
   from?: Date;
@@ -14,9 +15,13 @@ export interface ListCallsOptions {
 
 // Shape mirrors the `include` below so server callers get typed relations
 // instead of a bare CallLog (the /api/calls JSON already carried these).
+// `escalation` is the human-handoff record — included so the AI Receptionist
+// list can badge flagged calls without an N+1 query per row (at most one per
+// call, unique index on Escalation.callLogId).
 export type CallLogListItem = CallLog & {
   patient: { id: string; fullName: string } | null;
   appointment: { id: string; scheduledAt: Date } | null;
+  escalation: EscalationSummary | null;
 };
 
 export async function listCalls(
@@ -43,6 +48,7 @@ export async function listCalls(
       include: {
         patient: { select: { id: true, fullName: true } },
         appointment: { select: { id: true, scheduledAt: true } },
+        escalation: { select: escalationSelect },
       },
     }),
     prisma.callLog.count({ where }),
@@ -65,6 +71,7 @@ export async function getCall(
           doctor: { select: { id: true, name: true } },
         },
       },
+      escalation: { select: escalationSelect },
     },
   });
 }
