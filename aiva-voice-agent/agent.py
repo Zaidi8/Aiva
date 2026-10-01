@@ -47,7 +47,7 @@ from livekit.agents import (
     WorkerOptions,
     cli,
 )
-from livekit.agents.llm import ChatChunk, ChatContext, FallbackAdapter
+from livekit.agents.llm import ChatChunk, ChatContext
 from livekit.plugins import elevenlabs, groq, silero
 from livekit.plugins.turn_detector.english import EnglishModel
 
@@ -66,6 +66,8 @@ from clinic_context import (
 )
 from speech_filter import sanitize_for_speech
 from tools import ToolConfig, build_tools
+from llm_usage import LLMUsageTracker
+from rate_limit_fallback import RateLimitAwareFallbackAdapter
 
 load_dotenv()
 
@@ -116,6 +118,10 @@ class AivaAgent(Agent):
     text stream).
     """
 
+    def __init__(self, *, usage_tracker: LLMUsageTracker | None = None, **kwargs):
+        super().__init__(**kwargs)
+        self._usage_tracker = usage_tracker
+
     async def tts_node(
         self, text: AsyncIterable[str], model_settings: ModelSettings
     ) -> AsyncIterable[rtc.AudioFrame]:
@@ -138,11 +144,27 @@ class AivaAgent(Agent):
         to try again (by which point the per-minute token budget has refilled)."""
         produced = False
         try:
-            async for chunk in Agent.default.llm_node(
-                self, chat_ctx, tools, model_settings
-            ):
-                produced = True
-                yield chunk
+            if self._usage_tracker is None:
+                async for chunk in Agent.default.llm_node(
+                    self, chat_ctx, tools, model_settings
+                ):
+                    produced = True
+                    yield chunk
+            else:
+                token = None
+                try:
+                    _, token = self._usage_tracker.begin_request(chat_ctx, tools)
+                except Exception:  # telemetry must never affect a caller's turn
+                    logger.exception("Failed to snapshot LLM request for telemetry")
+                try:
+                    async for chunk in Agent.default.llm_node(
+                        self, chat_ctx, tools, model_settings
+                    ):
+                        produced = True
+                        yield chunk
+                finally:
+                    if token is not None:
+                        self._usage_tracker.end_request(token)
         except APIError as exc:
             logger.warning(
                 "LLM completion failed (%s) — speaking fallback line.", exc
@@ -601,20 +623,32 @@ async def entrypoint(ctx: JobContext) -> None:
     # going silent (Phase 7).
     primary_model = os.environ.get("AIVA_PRIMARY_MODEL", "qwen/qwen3.8-27b")
     fallback_model = os.environ.get("AIVA_FALLBACK_MODEL", "openai/gpt-oss-120b")
-    llm = FallbackAdapter(
-        [
-            groq.LLM(
-                model=primary_model,
-                temperature=0.3,
-                max_completion_tokens=512,
-            ),
-            groq.LLM(
-                model=fallback_model,
-                temperature=0.3,
-                max_completion_tokens=512,
-            ),
-        ]
+    provider_llms = [
+        groq.LLM(
+            model=primary_model,
+            temperature=0.3,
+            max_completion_tokens=512,
+        ),
+        groq.LLM(
+            model=fallback_model,
+            temperature=0.3,
+            max_completion_tokens=512,
+        ),
+    ]
+    usage_tracker = LLMUsageTracker(
+        call_id=provider_call_id or ctx.room.name,
+        room_id=ctx.room.name,
+        job_id=str(getattr(getattr(ctx, "job", None), "id", "unknown")),
     )
+    try:
+        usage_tracker.attach_llms(provider_llms)
+    except Exception:  # instrumentation must never prevent the agent from starting
+        logger.exception("Failed to install provider usage listeners")
+    llm = RateLimitAwareFallbackAdapter(provider_llms)
+    try:
+        usage_tracker.attach_fallback_adapter(llm)
+    except Exception:  # instrumentation must never prevent the agent from starting
+        logger.exception("Failed to install fallback lifecycle instrumentation")
     tts = elevenlabs.TTS(
         api_key=os.environ["ELEVENLABS_API_KEY"],
         voice_id="EXAVITQu4vr4xnSDxMaL",  # "Sarah" — mature, reassuring; fits a clinic receptionist
@@ -670,9 +704,13 @@ async def entrypoint(ctx: JobContext) -> None:
             ),
         )
     )
+    try:
+        tools = usage_tracker.wrap_tools(tools)
+    except Exception:  # instrumentation must never prevent a tool from registering
+        logger.exception("Failed to install tool usage instrumentation")
     logger.info("Loaded %d read-only tools: %s", len(tools), [t.info.name for t in tools])
 
-    agent = AivaAgent(instructions=system_prompt, tools=tools)
+    agent = AivaAgent(instructions=system_prompt, tools=tools, usage_tracker=usage_tracker)
 
     await session.start(agent=agent, room=ctx.room)
     logger.info("AgentSession started — Aiva is speaking the greeting.")
@@ -690,6 +728,10 @@ async def entrypoint(ctx: JobContext) -> None:
     def _on_user_transcribed(event: UserInputTranscribedEvent) -> None:
         if not event.is_final or not (event.transcript or "").strip():
             return
+        try:
+            usage_tracker.begin_user_turn(event.transcript)
+        except Exception:
+            logger.exception("Failed to record user-turn telemetry")
         call_logger._spawn(call_logger.record_user_turn(event.transcript))
 
     @session.on("conversation_item_added")
@@ -706,6 +748,8 @@ async def entrypoint(ctx: JobContext) -> None:
     def _on_close(_event: CloseEvent) -> None:
         silence_escalation.close()
         call_logger._spawn(call_logger.record_end())
+        call_logger._spawn(usage_tracker.log_call_summary())
+        usage_tracker.detach_llms()
 
     # Phase 9: watchdog for a caller who never speaks. Without it the agent can
     # wait in dead air forever (the turn-detector handles speech->pause, but has

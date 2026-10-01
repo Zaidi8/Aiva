@@ -284,8 +284,7 @@ def build_tools(config: ToolConfig) -> list:
 
     @function_tool
     async def list_doctors(query: str = "") -> str:
-        """List the clinic's doctors. `query` is the caller's search term (name or
-        kind, e.g. "cardiologist"), or empty to list everyone."""
+        """List clinic doctors, optionally matching a name or specialty."""
         params = {"q": query} if query.strip() else {}
         data = await _get(config, "doctors", params)
         if data is None:
@@ -311,13 +310,9 @@ def build_tools(config: ToolConfig) -> list:
         from_time: str = "",
         to_time: str = "",
     ) -> str:
-        """Check a doctor's open slots on `date` (YYYY-MM-DD, clinic-local). If the
-        caller named ONE time, pass it as `time` ("HH:mm", 24h, e.g. "16:30") to
-        get whether it's open plus nearest alternatives. If they named a WINDOW
-        ("between 4 and 5", "morning", "after 2"), pass its edges as
-        `from_time`/`to_time` ("HH:mm", 24h; either may be empty for half-open) to
-        get which slots inside are open plus the nearest outside each edge. Use at
-        most ONE of `time` and the from/to pair. Read-only."""
+        """Check one doctor's slots for a clinic-local date (YYYY-MM-DD). For one
+        requested time use `time` (24-hour HH:mm); for a window use `from_time` and/or
+        `to_time` (HH:mm). Do not combine a single time with window fields. Read-only."""
         _say_filler(context, "Let me check that for you.")
         params = {"doctorName": doctor_name, "date": date}
         if time.strip():
@@ -403,9 +398,8 @@ def build_tools(config: ToolConfig) -> list:
 
     @function_tool
     async def lookup_appointments(context: RunContext, phone: str) -> str:
-        """Find the caller's upcoming appointments by `phone`. Use FIRST when they want
-        to cancel or move one, so you have the exact doctor, date, and time.
-        Read-only."""
+        """Find upcoming appointments by phone. Use before canceling or rescheduling
+        to identify the exact doctor, date, and time. Read-only."""
         _say_filler(context, "Let me pull that up.")
         data = await _get(config, "appointments", {"phone": phone})
         if data is None:
@@ -432,14 +426,10 @@ def build_tools(config: ToolConfig) -> list:
         patient_name: str = "",
         confirm: bool = False,
     ) -> str:
-        """Book an appointment. WRITES. Call only after the slot is confirmed open, the
-        caller gave their real full name + phone, and they said yes to a read-back.
-        `date` YYYY-MM-DD, `time` "HH:mm" matching an open slot, `phone` the
-        caller's number. If the caller attempts a time that is already booked for
-        the SAME name and number (a different doctor's slot), this tool announces
-        the clash and REFUSES the write — a conflicted booking can never be made on
-        this call, regardless of `confirm`. Do not re-call after a clash; wait for
-        the caller's reply (they can pick another time)."""
+        """Book a confirmed open slot. Use only after collecting the patient's real
+        full name and phone, reading back doctor/date/time/name/phone, and receiving
+        a clear yes on the next turn. Date is YYYY-MM-DD; time is an open HH:mm slot.
+        A same-time conflict is announced and refused; do not retry that booking."""
         _say_filler(context, "Okay, booking that now.")
         # Safety net: reject empty / obviously fake phone numbers.
         digits = re.sub(r"\D", "", phone or "")
@@ -539,10 +529,8 @@ def build_tools(config: ToolConfig) -> list:
         time: str,
         phone: str,
     ) -> str:
-        """Cancel one of the caller's appointments. WRITES. Call only after you looked
-        it up, read it back, and the caller said yes. `date`/`time` are that
-        appointment's date (YYYY-MM-DD) and time ("HH:mm"); `phone` the number
-        it's under."""
+        """Cancel an existing appointment only after lookup, exact read-back, and the
+        caller's clear yes. Supply its current date/time and phone."""
         _say_filler(context, "Okay, let me cancel that.")
         data = await _post(
             config,
@@ -579,14 +567,10 @@ def build_tools(config: ToolConfig) -> list:
         phone: str,
         confirm: bool = False,
     ) -> str:
-        """Move one of the caller's appointments to a new time (same doctor). WRITES.
-        Call only after you looked it up, confirmed the NEW time is open, read the
-        move back, and the caller said yes. `date`/`time` are the CURRENT date
-        (YYYY-MM-DD) and time ("HH:mm"); `new_date`/`new_time` the new ones;
-        `phone` the number it's under. If the new time clashes with the caller's
-        booking under a different doctor, this tool announces the clash and REFUSES
-        the move — a clashing move can never be made on this call, regardless of
-        `confirm`. Do not re-call after a clash; wait for the caller's reply."""
+        """Move an existing appointment for the same doctor. Use only after lookup,
+        confirming the new slot is open, exact read-back, and the caller's clear yes.
+        Supply current/new dates (YYYY-MM-DD), times (HH:mm), and phone. A
+        cross-doctor time conflict is announced and refused; do not retry that move."""
         _say_filler(context, "Okay, let me move that for you.")
         key = _conflict_key(doctor_name, new_date, new_time, phone)
         # Deterministic auto-book kill, same as book_appointment: a target slot
